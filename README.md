@@ -1,29 +1,45 @@
-# Tilda Ijro Nazorati Backend
+# Ijro nazorati backend — Stage 2 Supabase
 
-Bu backend Tilda ichidagi HTML mini-dastur uchun 2 ta endpoint beradi:
+Bu backend Tilda ichidagi HTML mini-dastur uchun ishlaydi:
 
-1. `GET /api/company-by-tin?tin=310153191&source=auto`
-2. `POST /api/telegram-notify`
+- Supabase PostgreSQL bazasi bilan umumiy ma'lumot saqlash
+- Telegram xabar yuborish
+- STIR bo'yicha korxona nomini ochiq manbadan olish
 
-## Ishga tushirish
+## Render Environment Variables
 
-```bash
-npm install
-TELEGRAM_BOT_TOKEN=123456:ABC npm start
+Render → Service → Environment bo'limiga quyidagilarni kiriting:
+
+```text
+TELEGRAM_BOT_TOKEN=BotFather token
+SUPABASE_URL=https://PROJECT_ID.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=Supabase secret/service_role key
+ALLOWED_ORIGIN=*
 ```
 
-## Tilda HTML ichida sozlanadigan manzillar
+## Endpointlar
 
-HTML faylda quyidagilarni o'zgartiring:
-
-```js
-const COMPANY_LOOKUP_ENDPOINT = 'https://your-backend-domain.uz/api/company-by-tin';
-const TELEGRAM_NOTIFY_ENDPOINT = 'https://your-backend-domain.uz/api/telegram-notify';
+```text
+GET  /health
+POST /api/auth/login
+GET  /api/bootstrap
+GET  /api/company-by-tin?tin=310153191&source=auto
+POST /api/telegram-notify
+POST /api/users
+PUT  /api/users/:id
+DELETE /api/users/:id
+POST /api/companies
+PUT  /api/companies/:id
+DELETE /api/companies/:id
+POST /api/tasks
+PUT  /api/tasks/:id
+POST /api/tasks/:id/confirm
+DELETE /api/tasks/:id
+POST /api/task-templates
+PUT  /api/task-templates/:id
+DELETE /api/task-templates/:id
 ```
 
-## Muhim
+## GitHubga yuklash
 
-- Telegram bot tokenni HTML ichiga yozmang.
-- Xodimlar botga /start yuborishi kerak.
-- `chat_id` ni backend loglari, getUpdates yoki alohida bot handler orqali olib, xodim kartasiga kiriting.
-- Orginfo uchun parser namunaviy. Sayt tuzilishi o'zgarsa, rasmiy API yoki iHamkor/Birdarcha ruxsatli endpointidan foydalaning.
+Repositoryda eski `server.js`, `package.json`, `README.md` fayllarni shu fayllar bilan almashtiring. Render avtomatik qayta deploy qiladi.
