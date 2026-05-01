@@ -1,14 +1,13 @@
-# Ijro nazorati backend — Stage 2 Supabase
+# Ijro nazorati backend — Stage 3
 
-Bu backend Tilda ichidagi HTML mini-dastur uchun ishlaydi:
+Stage 3 quyidagilarni qo'shadi:
 
-- Supabase PostgreSQL bazasi bilan umumiy ma'lumot saqlash
-- Telegram xabar yuborish
-- STIR bo'yicha korxona nomini ochiq manbadan olish
+- Topshiriq tarixi endpointi va HTML ichida ko'rish
+- Hisobotlar bo'limi
+- Korxona/xodim/status/muddat/tezkor/kechikkan filtrlar
+- Excel uchun CSV eksport endpointi
 
 ## Render Environment Variables
-
-Render → Service → Environment bo'limiga quyidagilarni kiriting:
 
 ```text
 TELEGRAM_BOT_TOKEN=BotFather token
@@ -17,29 +16,10 @@ SUPABASE_SERVICE_ROLE_KEY=Supabase secret/service_role key
 ALLOWED_ORIGIN=*
 ```
 
-## Endpointlar
+## Yangi endpoint
 
 ```text
-GET  /health
-POST /api/auth/login
-GET  /api/bootstrap
-GET  /api/company-by-tin?tin=310153191&source=auto
-POST /api/telegram-notify
-POST /api/users
-PUT  /api/users/:id
-DELETE /api/users/:id
-POST /api/companies
-PUT  /api/companies/:id
-DELETE /api/companies/:id
-POST /api/tasks
-PUT  /api/tasks/:id
-POST /api/tasks/:id/confirm
-DELETE /api/tasks/:id
-POST /api/task-templates
-PUT  /api/task-templates/:id
-DELETE /api/task-templates/:id
+GET /api/reports/tasks.csv
 ```
 
-## GitHubga yuklash
-
-Repositoryda eski `server.js`, `package.json`, `README.md` fayllarni shu fayllar bilan almashtiring. Render avtomatik qayta deploy qiladi.
+Filtr query parametrlari: `companyId`, `assigneeId`, `status`, `dateFrom`, `dateTo`, `overdue=true`, `quick=true/false`.
