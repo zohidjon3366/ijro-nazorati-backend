@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import * as cheerio from 'cheerio';
 import bcrypt from 'bcryptjs';
+import multer from 'multer';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
@@ -10,12 +11,22 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Accept']
 }));
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '5mb' }));
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: Number(process.env.MAX_ATTACHMENT_SIZE_MB || 25) * 1024 * 1024,
+    files: 1
+  }
+});
 
 const PORT = process.env.PORT || 3000;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const ATTACHMENTS_BUCKET = process.env.ATTACHMENTS_BUCKET || 'task-attachments';
+const MAX_ATTACHMENT_SIZE_MB = Number(process.env.MAX_ATTACHMENT_SIZE_MB || 25);
 
 const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
@@ -375,6 +386,56 @@ function toCsv(rows) {
   return '\ufeff' + rows.map(row => row.map(csvCell).join(';')).join('\n');
 }
 
+function sanitizeFileName(name) {
+  const original = cleanText(name || 'file');
+  const safe = original
+    .replace(/[\\/:*?"<>|#%{}^~[\]`]/g, '_')
+    .replace(/\s+/g, '_')
+    .slice(0, 180);
+  return safe || 'file';
+}
+
+function extFromName(name) {
+  const safe = sanitizeFileName(name);
+  const idx = safe.lastIndexOf('.');
+  return idx >= 0 ? safe.slice(idx).toLowerCase() : '';
+}
+
+function attachmentToClient(a, signedUrl = '') {
+  if (!a) return null;
+  return {
+    id: a.id,
+    taskId: a.task_id,
+    fileName: a.file_name || '',
+    filePath: a.file_path || '',
+    fileType: a.file_type || '',
+    fileSize: a.file_size || 0,
+    uploadedBy: a.uploaded_by || '',
+    createdAt: a.created_at,
+    url: signedUrl || ''
+  };
+}
+
+async function createSignedAttachmentUrl(filePath) {
+  if (!filePath) return '';
+  const { data, error } = await supabase.storage.from(ATTACHMENTS_BUCKET).createSignedUrl(filePath, 60 * 60);
+  if (error) {
+    console.warn('Signed URL failed:', error.message);
+    return '';
+  }
+  return data?.signedUrl || '';
+}
+
+async function ensureTaskExists(taskId) {
+  const task = await getById('tasks', taskId);
+  if (!task) {
+    const err = new Error('Topshiriq topilmadi');
+    err.status = 404;
+    throw err;
+  }
+  return task;
+}
+
 function handleError(res, err) {
   console.error(err);
   const status = err.status || err.code === '23505' ? 409 : 500;
@@ -634,6 +695,96 @@ app.delete('/api/tasks/:id', async (req, res) => {
     return handleError(res, err);
   }
 });
+
+
+app.get('/api/tasks/:id/attachments', async (req, res) => {
+  try {
+    ensureDb();
+    await ensureTaskExists(req.params.id);
+    const { data, error } = await supabase
+      .from('task_attachments')
+      .select('*, app_users(full_name)')
+      .eq('task_id', req.params.id)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    const withUrls = await Promise.all((data || []).map(async a => ({
+      ...attachmentToClient(a, await createSignedAttachmentUrl(a.file_path)),
+      uploadedByName: a.app_users?.full_name || ''
+    })));
+    return res.json({ ok: true, data: withUrls });
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+
+app.post('/api/tasks/:id/attachments', upload.single('file'), async (req, res) => {
+  try {
+    ensureDb();
+    const task = await ensureTaskExists(req.params.id);
+    if (!req.file) return res.status(400).json({ ok: false, error: 'Fayl tanlanmagan' });
+    if (req.file.size > MAX_ATTACHMENT_SIZE_MB * 1024 * 1024) {
+      return res.status(400).json({ ok: false, error: `Fayl hajmi ${MAX_ATTACHMENT_SIZE_MB} MB dan oshmasin` });
+    }
+
+    const actorId = req.body.actorId || req.body.actor_id || null;
+    const originalName = sanitizeFileName(req.file.originalname || 'file');
+    const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '');
+    const randomPart = Math.random().toString(36).slice(2, 8);
+    const storagePath = `${req.params.id}/${stamp}_${randomPart}_${originalName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(ATTACHMENTS_BUCKET)
+      .upload(storagePath, req.file.buffer, {
+        contentType: req.file.mimetype || 'application/octet-stream',
+        upsert: false
+      });
+    if (uploadError) throw uploadError;
+
+    const { data, error } = await supabase.from('task_attachments').insert({
+      task_id: req.params.id,
+      file_name: req.file.originalname || originalName,
+      file_path: storagePath,
+      file_type: req.file.mimetype || 'application/octet-stream',
+      file_size: req.file.size || 0,
+      uploaded_by: actorId
+    }).select('*').single();
+    if (error) throw error;
+
+    await addTaskHistory(task.id, actorId, 'Ilova yuklandi', task.status, task.status, req.file.originalname || originalName);
+    const signedUrl = await createSignedAttachmentUrl(data.file_path);
+    return res.json({ ok: true, data: attachmentToClient(data, signedUrl) });
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+
+app.delete('/api/attachments/:id', async (req, res) => {
+  try {
+    ensureDb();
+    const { data: attachment, error: findError } = await supabase
+      .from('task_attachments')
+      .select('*')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (findError) throw findError;
+    if (!attachment) return res.status(404).json({ ok: false, error: 'Ilova topilmadi' });
+
+    if (attachment.file_path) {
+      const { error: storageError } = await supabase.storage
+        .from(ATTACHMENTS_BUCKET)
+        .remove([attachment.file_path]);
+      if (storageError) console.warn('Storage remove failed:', storageError.message);
+    }
+
+    const { error } = await supabase.from('task_attachments').delete().eq('id', req.params.id);
+    if (error) throw error;
+    await addTaskHistory(attachment.task_id, req.query.actorId || null, 'Ilova o‘chirildi', null, null, attachment.file_name || '');
+    return res.json({ ok: true });
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+
 
 app.get('/api/tasks/:id/history', async (req, res) => {
   try {
