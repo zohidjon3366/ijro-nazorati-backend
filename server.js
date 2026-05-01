@@ -353,6 +353,28 @@ async function addTaskHistory(taskId, userId, action, oldStatus, newStatus, note
   }
 }
 
+
+function isTaskDoneServer(status) {
+  return status === 'Bajarildi' || status === 'Direktor tasdiqladi';
+}
+
+function todayIsoServer() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function isTaskOverdueServer(task) {
+  return !!(task.deadline && task.deadline < todayIsoServer() && !isTaskDoneServer(task.status) && task.status !== 'Bekor qilindi');
+}
+
+function csvCell(value) {
+  const text = String(value ?? '').replace(/\r?\n/g, ' ');
+  return '"' + text.replace(/"/g, '""') + '"';
+}
+
+function toCsv(rows) {
+  return '\ufeff' + rows.map(row => row.map(csvCell).join(';')).join('\n');
+}
+
 function handleError(res, err) {
   console.error(err);
   const status = err.status || err.code === '23505' ? 409 : 500;
@@ -619,6 +641,56 @@ app.get('/api/tasks/:id/history', async (req, res) => {
     const { data, error } = await supabase.from('task_history').select('*, app_users(full_name)').eq('task_id', req.params.id).order('created_at', { ascending: false });
     if (error) throw error;
     return res.json({ ok: true, data });
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+
+
+app.get('/api/reports/tasks.csv', async (req, res) => {
+  try {
+    ensureDb();
+    const [tasksRes, companiesRes, usersRes] = await Promise.all([
+      supabase.from('tasks').select('*').order('created_at', { ascending: false }),
+      supabase.from('companies').select('*'),
+      supabase.from('app_users').select('*')
+    ]);
+    for (const r of [tasksRes, companiesRes, usersRes]) if (r.error) throw r.error;
+
+    const companies = new Map((companiesRes.data || []).map(c => [c.id, c]));
+    const users = new Map((usersRes.data || []).map(u => [u.id, u]));
+    const q = req.query || {};
+
+    let tasks = tasksRes.data || [];
+    if (q.companyId) tasks = tasks.filter(t => t.company_id === q.companyId);
+    if (q.assigneeId) tasks = tasks.filter(t => t.assignee_id === q.assigneeId);
+    if (q.status) tasks = tasks.filter(t => t.status === q.status);
+    if (q.quick === 'true') tasks = tasks.filter(t => !!t.is_quick);
+    if (q.quick === 'false') tasks = tasks.filter(t => !t.is_quick);
+    if (q.dateFrom) tasks = tasks.filter(t => t.deadline && t.deadline >= q.dateFrom);
+    if (q.dateTo) tasks = tasks.filter(t => t.deadline && t.deadline <= q.dateTo);
+    if (q.overdue === 'true') tasks = tasks.filter(isTaskOverdueServer);
+
+    const rows = [[
+      'Korxona STIR', 'Korxona', 'Topshiriq', 'Turi', 'Muhimlik', 'Masul xodim',
+      'Muddat', 'Status', 'Faol', 'Tezkor', 'Kechikkan', 'Topshiriq mazmuni',
+      'Xodim izohi', 'Direktor izohi', 'Yaratilgan sana', 'Bajarilgan sana'
+    ]];
+
+    for (const t of tasks) {
+      const c = companies.get(t.company_id) || {};
+      const u = users.get(t.assignee_id) || {};
+      rows.push([
+        c.tin || '', c.name || '', t.title || '', t.type || '', t.priority || '', u.full_name || '',
+        t.deadline || '', t.status || '', t.is_active ? 'Faol' : 'To‘xtatilgan', t.is_quick ? 'Ha' : 'Yo‘q',
+        isTaskOverdueServer(t) ? 'Ha' : 'Yo‘q', t.description || '', t.employee_note || '', t.director_note || '',
+        t.created_at || '', t.completed_at || ''
+      ]);
+    }
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="ijro_nazorati_topshiriqlar.csv"');
+    return res.send(toCsv(rows));
   } catch (err) {
     return handleError(res, err);
   }
