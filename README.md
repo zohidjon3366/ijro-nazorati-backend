@@ -23,3 +23,28 @@ GET /api/reports/tasks.csv
 ```
 
 Filtr query parametrlari: `companyId`, `assigneeId`, `status`, `dateFrom`, `dateTo`, `overdue=true`, `quick=true/false`.
+
+
+## Stage 4: Topshiriq ilovalari
+
+Qo‘shimcha endpointlar:
+
+```text
+GET    /api/tasks/:id/attachments
+POST   /api/tasks/:id/attachments
+DELETE /api/attachments/:id
+```
+
+`POST /api/tasks/:id/attachments` `multipart/form-data` qabul qiladi:
+
+- `file` — yuklanadigan fayl
+- `actorId` — foydalanuvchi ID
+
+Render Environment Variables:
+
+```text
+ATTACHMENTS_BUCKET=task-attachments
+MAX_ATTACHMENT_SIZE_MB=25
+```
+
+Supabase’da `task_attachments` jadvali va `task-attachments` Storage bucket yaratilgan bo‘lishi kerak.
