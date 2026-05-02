@@ -325,6 +325,10 @@ async function notifyTaskCreated(task) {
   }
 }
 
+function notifyTaskCreatedAsync(task) {
+  setTimeout(() => notifyTaskCreated(task).catch(err => console.warn('Task created telegram async failed:', err.message)), 0);
+}
+
 async function notifyDirectorsTaskStatusChanged(task, oldStatus) {
   try {
     const [company, assignee, directorsRes] = await Promise.all([
@@ -442,7 +446,17 @@ function handleError(res, err) {
   return res.status(status).json({ ok: false, error: err.message || 'Server xatosi', details: err.details || null });
 }
 
-app.get('/health', (_, res) => res.json({ ok: true, supabase: !!supabase }));
+app.get('/health', (_, res) => res.json({ ok: true, supabase: !!supabase, time: new Date().toISOString() }));
+
+app.get('/api/warmup', async (_, res) => {
+  try {
+    ensureDb();
+    await supabase.from('app_users').select('id', { count: 'exact', head: true }).limit(1);
+    return res.json({ ok: true, db: true, time: new Date().toISOString() });
+  } catch (err) {
+    return res.json({ ok: false, db: false, error: err.message, time: new Date().toISOString() });
+  }
+});
 
 app.get('/api/company-by-tin', async (req, res) => {
   try {
@@ -490,6 +504,13 @@ app.post('/api/auth/login', async (req, res) => {
     if (!user.is_active) return res.status(403).json({ ok: false, error: 'Foydalanuvchi vaqtincha to‘xtatilgan' });
     const valid = await verifyPassword(password, user.password_hash);
     if (!valid) return res.status(401).json({ ok: false, error: 'Login yoki parol noto‘g‘ri' });
+
+    // Tezkor login: HTML avval foydalanuvchini kiritadi, ma’lumotlarni keyin alohida yuklaydi.
+    // Eski HTML bilan moslik uchun bootstrap=false bo‘lmasa, eski usul saqlanadi.
+    if (String(req.query.bootstrap || '').toLowerCase() === 'false') {
+      return res.json({ ok: true, user: userToClient(user) });
+    }
+
     const data = await getBootstrapData();
     return res.json({ ok: true, user: userToClient(user), data });
   } catch (err) {
@@ -636,8 +657,47 @@ app.post('/api/tasks', async (req, res) => {
     const { data, error } = await supabase.from('tasks').insert(payload).select('*').single();
     if (error) throw error;
     await addTaskHistory(data.id, payload.created_by, payload.is_quick ? 'Tezkor topshiriq yaratildi' : 'Topshiriq yaratildi', null, data.status, data.description);
-    await notifyTaskCreated(data);
+    notifyTaskCreatedAsync(data);
     return res.json({ ok: true, data: taskToClient(data) });
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+
+
+app.post('/api/tasks/bulk', async (req, res) => {
+  try {
+    ensureDb();
+    const rawIds = Array.isArray(req.body.companyIds) ? req.body.companyIds : (Array.isArray(req.body.company_ids) ? req.body.company_ids : []);
+    const companyIds = [...new Set(rawIds.map(id => cleanText(id)).filter(Boolean))];
+    if (!companyIds.length) return res.status(400).json({ ok: false, error: 'Kamida bitta korxona tanlang' });
+    if (companyIds.length > 500) return res.status(400).json({ ok: false, error: 'Bir martada 500 tagacha korxonaga topshiriq berish mumkin' });
+    const base = taskFromBody(req.body, true);
+    if (!base.assignee_id) return res.status(400).json({ ok: false, error: 'Xodim tanlang' });
+    if (!base.title) return res.status(400).json({ ok: false, error: 'Topshiriq nomi majburiy' });
+    delete base.company_id;
+    const now = new Date().toISOString();
+    const rows = companyIds.map(companyId => ({
+      ...base,
+      company_id: companyId,
+      completed_at: base.status === 'Bajarildi' ? now : null
+    }));
+    const { data, error } = await supabase.from('tasks').insert(rows).select('*');
+    if (error) throw error;
+    const historyRows = (data || []).map(task => ({
+      task_id: task.id,
+      user_id: base.created_by || null,
+      action: task.is_quick ? 'Ommaviy tezkor topshiriq yaratildi' : 'Ommaviy topshiriq yaratildi',
+      old_status: null,
+      new_status: task.status,
+      note: task.description || null
+    }));
+    if (historyRows.length) {
+      const { error: historyError } = await supabase.from('task_history').insert(historyRows);
+      if (historyError) console.warn('Bulk task history failed:', historyError.message);
+    }
+    (data || []).forEach(task => notifyTaskCreatedAsync(task));
+    return res.json({ ok: true, count: (data || []).length, data: (data || []).map(taskToClient) });
   } catch (err) {
     return handleError(res, err);
   }
