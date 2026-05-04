@@ -113,6 +113,15 @@ body{font-family:"Manrope",Inter,Arial,sans-serif} h1,h2,h3,h4,b,.btn,.menu butt
 
 @media(max-width:920px){.kanban-board.compact-board .kanban-col{max-height:none}.kanban-board.compact-board .kanban-list{max-height:420px}.kanban-toolbar .field-mini,.kanban-toolbar .field-search{flex:1 1 100%;min-width:0}.kanban-toolbar-actions{width:100%}.kanban-toolbar-actions .btn{flex:1}}
 
+/* Stage 7.8 — employee daily stats and live deadline countdown */
+.overview-grid{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+.stack-label-btn{appearance:none;border:0;background:transparent;padding:0;text-align:left;cursor:pointer;color:var(--text);font:inherit;font-weight:900;line-height:1.28;word-break:break-word}
+.stack-label-btn:hover{color:var(--primary);text-decoration:underline;text-underline-offset:3px}.stack-label-btn .stack-sub{pointer-events:none}
+.employee-daily-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:0 0 14px}.employee-daily-card{border:1px solid var(--line);background:var(--surface);border-radius:16px;padding:12px}.employee-daily-card span{display:block;font-size:11px;color:var(--text-soft);font-weight:800}.employee-daily-card b{display:block;font-size:24px;margin-top:4px;color:var(--text)}
+.daily-bars{display:grid;gap:10px;max-height:430px;overflow:auto;padding-right:4px}.daily-row{display:grid;grid-template-columns:105px 1fr 44px;gap:10px;align-items:center}.daily-date{font-size:12px;font-weight:900;color:var(--text)}.daily-track{height:26px;border-radius:999px;background:rgba(148,163,184,.18);overflow:hidden}.daily-fill{height:100%;min-width:26px;border-radius:999px;background:linear-gradient(90deg,#4f7cff,#14c97a);display:flex;align-items:center;justify-content:flex-end;padding-right:8px;color:#fff;font-size:12px;font-weight:900}.daily-value{text-align:right;font-weight:900;color:var(--text);font-size:13px}
+.countdown-pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:4px 8px;background:rgba(79,124,255,.12);color:var(--primary);font-size:11px;font-weight:900;white-space:nowrap}.countdown-pill.warn{background:rgba(245,185,66,.18);color:#a06b00}.countdown-pill.danger{background:rgba(239,83,80,.14);color:#c03531}.countdown-pill.done{background:rgba(20,201,122,.14);color:#0a8a52}.countdown-pill.expired{background:rgba(239,83,80,.18);color:#b42318}.deadline-line{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.deadline-card-title{font-size:12px;color:var(--text-soft);font-weight:800;margin-top:8px}.deadline-card-task{font-size:12px;color:var(--text);font-weight:900;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dashboard-deadline-wrap{display:grid;gap:4px}.dashboard-countdown{font-size:17px!important;letter-spacing:-.02em!important}.due-soon-note{font-size:11px;color:var(--text-soft);margin-top:4px}
+@media(max-width:640px){.daily-row{grid-template-columns:1fr;gap:6px}.daily-value{text-align:left}.daily-track{height:24px}.dashboard-countdown{font-size:15px!important}}
+
   </style>
 </head>
 <body>
@@ -163,6 +172,50 @@ function taskApprovedAt(task){ return task?.updatedAt || task?.completedAt || ta
 function isArchivedApproved(task){ if(!task || task.status !== 'Direktor tasdiqladi') return false; const d = String(taskApprovedAt(task)).slice(0,10); return !!d && d < todayISO(); }
 function stripTaskTimeMarker(text){ return String(text || '').replace(/\n?\[Soat:\s*\d{2}:\d{2}\]\s*/g,'').trim(); }
 function getTaskTime(task){ const text = String((task?.directorNote || '') + '\n' + (task?.description || '')); const m = text.match(/\[Soat:\s*(\d{2}:\d{2})\]/); return m ? m[1] : ''; }
+function taskDeadlineDate(task){
+  if(!task?.deadline) return null;
+  const time = getTaskTime(task) || '23:59';
+  const d = new Date(String(task.deadline).slice(0,10) + 'T' + time + ':00');
+  return isNaN(d.getTime()) ? null : d;
+}
+function remainingMs(task){ const d = taskDeadlineDate(task); return d ? d.getTime() - Date.now() : null; }
+function formatRemaining(ms){
+  if(ms === null || ms === undefined) return '-';
+  const past = ms < 0;
+  let sec = Math.max(0, Math.floor(Math.abs(ms)/1000));
+  const days = Math.floor(sec/86400); sec -= days*86400;
+  const hours = Math.floor(sec/3600); sec -= hours*3600;
+  const min = Math.floor(sec/60); sec -= min*60;
+  const pad = n => String(n).padStart(2,'0');
+  return (past ? '-' : '') + days + ':' + pad(hours) + ':' + pad(min) + ':' + pad(sec);
+}
+function countdownClass(ms, task){ if(isDone(task?.status)) return 'done'; if(ms === null) return ''; if(ms < 0) return 'expired'; if(ms <= 3600000) return 'danger'; if(ms <= 86400000) return 'warn'; return ''; }
+function countdownHtml(task){
+  if(!task?.deadline) return '';
+  const ms = remainingMs(task);
+  const label = isDone(task.status) ? 'Yakunlangan' : (ms < 0 ? 'Muddati o‘tdi' : 'Qoldi');
+  const ts = taskDeadlineDate(task)?.getTime() || '';
+  return `<span class="countdown-pill ${countdownClass(ms,task)}" data-deadline-id="${escapeHtml(task.id)}" data-deadline-ts="${ts}" data-deadline-done="${isDone(task.status)?'1':'0'}"><span class="countdown-label">${label}</span> <span class="countdown-value">${formatRemaining(ms)}</span></span>`;
+}
+function deadlineWithCountdown(task){ return `<div class="deadline-line"><span>${deadlineText(task)}</span>${countdownHtml(task)}</div>`; }
+function updateCountdowns(){
+  document.querySelectorAll('[data-deadline-ts]').forEach(el=>{
+    const done = el.getAttribute('data-deadline-done') === '1';
+    const ts = Number(el.getAttribute('data-deadline-ts') || 0);
+    const value = el.querySelector('.countdown-value');
+    const label = el.querySelector('.countdown-label');
+    if(!ts || !value) return;
+    if(done){ value.textContent = 'Yakunlangan'; if(label) label.textContent = ''; return; }
+    const ms = ts - Date.now();
+    value.textContent = formatRemaining(ms);
+    if(label) label.textContent = ms < 0 ? 'Muddati o‘tdi' : 'Qoldi';
+    el.classList.remove('warn','danger','expired','done');
+    const cls = ms < 0 ? 'expired' : (ms <= 3600000 ? 'danger' : (ms <= 86400000 ? 'warn' : ''));
+    if(cls) el.classList.add(cls);
+  });
+}
+let countdownTimer=null;
+function ensureCountdownTimer(){ if(countdownTimer) return; countdownTimer=setInterval(updateCountdowns,1000); }
 function withTaskTimeMarker(note,time){ const clean = stripTaskTimeMarker(note); const t = String(time || '').trim(); return t ? (clean ? clean + '\n' : '') + '[Soat: ' + t + ']' : clean; }
 function deadlineText(task){ const d = task?.deadline || '-'; const time = getTaskTime(task); return d + (time ? ' <span class="deadline-time">' + escapeHtml(time) + '</span>' : ''); }
 function badgeClass(status, task){ if(task && isOverdue(task)) return 'red'; if(status==='Direktor tasdiqladi'||status==='Bajarildi') return 'green'; if(status==='Bajarilmoqda'||status==='Qabul qilindi') return 'yellow'; if(status==='Qayta ishlashga qaytarildi') return 'blue'; if(status==='Bajarilmadi') return 'red'; return 'gray'; }
@@ -215,6 +268,32 @@ function employeePerformance(tasks, limit=10){
   });
   return [...map.values()].filter(x=>x.total>0).sort((a,b)=>b.done-a.done || b.total-a.total || String(a.label).localeCompare(String(b.label))).slice(0,limit);
 }
+
+function taskCompletionDate(task){ return task?.completedAt || task?.completed_at || task?.updatedAt || task?.updated_at || task?.createdAt || task?.created_at || task?.deadline || ''; }
+function employeeDailyDoneStats(employeeId){
+  const tasks = state.tasks.filter(t=>t.assigneeId===employeeId && isDone(t.status));
+  const map = new Map();
+  tasks.forEach(t=>{ const d=String(taskCompletionDate(t)||'').slice(0,10) || '-'; map.set(d,(map.get(d)||0)+1); });
+  const rows = [...map.entries()].map(([date,value])=>({date,value})).sort((a,b)=>a.date.localeCompare(b.date));
+  return { tasks, rows };
+}
+function employeeDailyChart(rows){
+  if(!rows.length) return '<div class="stage77-empty">Bu xodim bo‘yicha bajarilgan topshiriqlar topilmadi.</div>';
+  const lastRows = rows.slice(-30);
+  const max = Math.max(...lastRows.map(x=>x.value),1);
+  return '<div class="daily-bars">'+lastRows.map(r=>{ const w=Math.max(8,Math.round(r.value/max*100)); return `<div class="daily-row"><div class="daily-date">${escapeHtml(r.date)}</div><div class="daily-track"><div class="daily-fill" style="width:${w}%"><span>${r.value}</span></div></div><div class="daily-value">${r.value}</div></div>`; }).join('')+'</div><div class="chart-total-note">Oxirgi 30 ta faol kun ko‘rsatiladi. Sana mavjud maydonlardan aniqlanadi.</div>';
+}
+function openEmployeeDailyStats(employeeId){
+  const u = byId(state.users, employeeId);
+  if(!u) return alert('Xodim topilmadi');
+  const { tasks, rows } = employeeDailyDoneStats(employeeId);
+  const total = tasks.length;
+  const active = state.tasks.filter(t=>t.assigneeId===employeeId && !isDone(t.status) && t.status!=='Bekor qilindi').length;
+  const overdue = state.tasks.filter(t=>t.assigneeId===employeeId && isOverdue(t)).length;
+  const best = rows.length ? rows.reduce((a,b)=>b.value>a.value?b:a, rows[0]) : null;
+  showModal('Xodim statistikasi: '+(u.name||'-'), `<div class="employee-daily-summary"><div class="employee-daily-card"><span>Bajarilgan jami</span><b>${total}</b></div><div class="employee-daily-card"><span>Jarayonda</span><b>${active}</b></div><div class="employee-daily-card"><span>Kechikkan</span><b>${overdue}</b></div><div class="employee-daily-card"><span>Eng faol kun</span><b>${best ? best.value : 0}</b><span>${best ? escapeHtml(best.date) : '-'}</span></div></div><h3 style="margin:0 0 12px">Kundalik bajarilgan topshiriqlar</h3>${employeeDailyChart(rows)}<div class="actions"><button class="btn ghost" onclick="closeModal()">Yopish</button></div>`);
+}
+
 function svgLineChart(data){
   const width=520, height=220, pad=30, max=Math.max(...data.values,1);
   const step = data.values.length>1 ? (width-pad*2)/(data.values.length-1) : 0;
@@ -241,7 +320,7 @@ function stackedEmployeeChart(items){
     const doneW = item.done ? Math.max(7, Math.round(item.done/total*100)) : 0;
     const progressW = item.progress ? Math.max(7, Math.round(item.progress/total*100)) : 0;
     const overdueW = item.overdue ? Math.max(7, Math.round(item.overdue/total*100)) : 0;
-    return `<div class="stack-row" title="${escapeHtml(item.label)} — Bajarilgan: ${item.done}, Jarayonda: ${item.progress}, Kechikkan: ${item.overdue}"><div class="stack-label">${escapeHtml(item.label)}<span class="stack-sub">Jami: ${item.total}</span></div><div class="stack-track">${item.done?`<span class="stack-seg done" style="width:${doneW}%"><em>${item.done}</em></span>`:''}${item.progress?`<span class="stack-seg progress" style="width:${progressW}%"><em>${item.progress}</em></span>`:''}${item.overdue?`<span class="stack-seg overdue" style="width:${overdueW}%"><em>${item.overdue}</em></span>`:''}</div></div>`;
+    return `<div class="stack-row" title="${escapeHtml(item.label)} — Bajarilgan: ${item.done}, Jarayonda: ${item.progress}, Kechikkan: ${item.overdue}"><button type="button" class="stack-label-btn" onclick="openEmployeeDailyStats('${escapeHtml(item.id)}')">${escapeHtml(item.label)}<span class="stack-sub">Jami: ${item.total} · batafsil ko‘rish</span></button><div class="stack-track">${item.done?`<span class="stack-seg done" style="width:${doneW}%"><em>${item.done}</em></span>`:''}${item.progress?`<span class="stack-seg progress" style="width:${progressW}%"><em>${item.progress}</em></span>`:''}${item.overdue?`<span class="stack-seg overdue" style="width:${overdueW}%"><em>${item.overdue}</em></span>`:''}</div></div>`;
   }).join('')+'</div>';
 }
 function analyticsSection(tasks){
@@ -325,20 +404,29 @@ function logout(renderNow=true){ currentUser = null; sessionStorage.removeItem('
 function render(){
   if(!currentUser) return renderLogin();
   $('root').innerHTML = `<div class="app"><div class="shell">${topbar()}${dashboard()}<div class="layout">${sidebar()}<div class="panel"><div class="panel-head"><h3>${viewTitle()}</h3><div>${headerAction()}</div></div><div class="panel-body">${mainView()}</div></div></div></div></div>${modalHtml()}`;
+  ensureCountdownTimer();
+  setTimeout(updateCountdowns,0);
 }
-function topbar(){ return `<div class="topbar"><div class="brand"><img class="brand-logo" src="${BRAND_LOGO}" alt="All Finance logo"><div><div class="brand-small">All Finance · </div><h1>Ijro nazorati</h1><p>KPI boshqaruv paneli</p></div></div><div class="topbar-right"><button class="theme-toggle" onclick="toggleTheme()">${icon(currentTheme==='dark' ? 'sun' : 'moon')} <span>${currentTheme==='dark' ? 'Yorug‘ rejim' : 'Tungi rejim'}</span></button><div class="userbox"><div class="avatar">${escapeHtml((currentUser.name||'?')[0])}</div><div><b>${escapeHtml(currentUser.name)}</b><br><span class="user-meta">${currentUser.role === 'director' ? 'Rahbar' : 'Xodim'}</span></div><button class="btn ghost small" onclick="logout()">Chiqish</button></div></div></div>`; }
+function topbar(){ return `<div class="topbar"><div class="brand"><img class="brand-logo" src="${BRAND_LOGO}" alt="All Finance logo"><div><div class="brand-small">All Finance </div><h1>Ijro nazorati</h1><p>KPI boshqaruv paneli</p></div></div><div class="topbar-right"><button class="theme-toggle" onclick="toggleTheme()">${icon(currentTheme==='dark' ? 'sun' : 'moon')} <span>${currentTheme==='dark' ? 'Yorug‘ rejim' : 'Tungi rejim'}</span></button><div class="userbox"><div class="avatar">${escapeHtml((currentUser.name||'?')[0])}</div><div><b>${escapeHtml(currentUser.name)}</b><br><span class="user-meta">${currentUser.role === 'director' ? 'Rahbar' : 'Xodim'}</span></div><button class="btn ghost small" onclick="logout()">Chiqish</button></div></div></div>`; }
+function nextDueTask(tasks){
+  return tasks.filter(t=>t.isActive!==false && !isDone(t.status) && t.status!=='Bekor qilindi' && taskDeadlineDate(t))
+    .sort((a,b)=>taskDeadlineDate(a)-taskDeadlineDate(b))[0] || null;
+}
 function dashboard(){
   const tasks = currentUser.role === 'employee' ? state.tasks.filter(t => t.assigneeId === currentUser.id) : state.tasks;
   const summary = statusStats(tasks);
   const companiesCount = currentUser.role === 'employee' ? new Set(tasks.map(t=>t.companyId)).size : state.companies.length;
   const completion = pct(summary.done, summary.total || 1);
+  const due = nextDueTask(tasks);
   const cards = [
-    {label:'Jami topshiriqlarlar', value:summary.total, foot: currentUser.role==='employee' ? 'sizga biriktirilgan' : companiesCount + ' ta korxona', icon:'tasks'},
+    {label:'Jami topshiriqlar', value:summary.total, foot: currentUser.role==='employee' ? 'sizga biriktirilgan' : companiesCount + ' ta korxona', icon:'tasks'},
     {label:'Bajarilgan', value:summary.done, foot: completion + '% yakunlandi', icon:'dashboard'},
     {label:'Jarayonda', value:summary.progress, foot: 'qabul qilindi / bajarilmoqda', icon:'quick'},
     {label:'Kechikkan', value:summary.overdue, foot: summary.failed + ' ta bajarilmadi', icon:'warning'}
   ];
-  return `<div class="section-stack"><div class="overview-grid">${cards.map(card=>`<div class="stat"><div class="stat-head"><div><div class="label">${card.label}</div><div class="value">${card.value}</div></div><div class="icon-badge">${icon(card.icon)}</div></div><div class="stat-foot">${card.foot}</div></div>`).join('')}</div>${analyticsSection(tasks)}</div>`;
+  const normalCards = cards.map(card=>`<div class="stat"><div class="stat-head"><div><div class="label">${card.label}</div><div class="value">${card.value}</div></div><div class="icon-badge">${icon(card.icon)}</div></div><div class="stat-foot">${card.foot}</div></div>`).join('');
+  const dueCard = `<div class="stat"><div class="stat-head"><div class="dashboard-deadline-wrap"><div class="label">Eng yaqin topshirish muddati</div><div class="value dashboard-countdown">${due ? countdownHtml(due) : '-'}</div>${due?`<div class="deadline-card-title">${deadlineText(due)}</div><div class="deadline-card-task" title="${escapeHtml(due.title)}">${escapeHtml(due.title)}</div>`:'<div class="due-soon-note">Faol topshiriq muddati topilmadi</div>'}</div><div class="icon-badge">${icon('calendar')}</div></div></div>`;
+  return `<div class="section-stack"><div class="overview-grid">${normalCards}${dueCard}</div>${analyticsSection(tasks)}</div>`;
 }
 function sidebar(){
   if(currentUser.role==='employee') return `<div class="panel"><div class="panel-head"><h3 class="section-title"><img class="mini-logo" src="${BRAND_LOGO}" alt="logo">Menyu</h3></div><div class="menu"><button class="${currentView==='my'?'active':''}" onclick="setView('my')"><span class="menu-left">${menuItemIcon('tasks')}Topshiriqlarim</span><span>${state.tasks.filter(t=>t.assigneeId===currentUser.id).length}</span></button><button class="${currentView==='kanban'?'active':''}" onclick="setView('kanban')"><span class="menu-left">${menuItemIcon('kanban')}Topshiriqlar doskasi</span><span>${state.tasks.filter(t=>t.assigneeId===currentUser.id).length}</span></button><button class="${currentView==='calendar'?'active':''}" onclick="setView('calendar')"><span class="menu-left">${menuItemIcon('calendar')}Kalendar</span><span>${state.tasks.filter(t=>t.assigneeId===currentUser.id && t.deadline).length}</span></button><button class="${currentView==='overdue'?'active':''}" onclick="setView('overdue')"><span class="menu-left">${menuItemIcon('warning')}Kechikkan</span><span>${state.tasks.filter(t=>t.assigneeId===currentUser.id && isOverdue(t)).length}</span></button></div></div>`;
@@ -413,7 +501,7 @@ function allowKanbanDrop(ev){ ev.preventDefault(); const zone=ev.currentTarget; 
 function leaveKanbanDrop(ev){ ev.currentTarget.classList.remove('drag-over'); }
 async function dropTaskToColumn(ev, key){ ev.preventDefault(); ev.currentTarget.classList.remove('drag-over'); if(!draggedTaskId) return; if(!canDropToColumn(key)) return alert(key==='archive' ? 'Arxiv avtomatik shakllanadi. Tasdiqlangan topshiriq ertasi kuni arxivda ko‘rinadi.' : 'Bu ustunga faqat rahbar taskni o‘tkaza oladi.'); const task=byId(state.tasks, draggedTaskId); if(!task) return; const newStatus = kanbanStatusForColumn(key); if(task.status===newStatus) return; try{ await api('/api/tasks/'+draggedTaskId,{method:'PUT',body:JSON.stringify({status:newStatus, actorId:currentUser.id})}); await loadData(); render(); }catch(err){ alert(err.message); } finally { draggedTaskId = null; } }
 function kanbanMiniActions(task){ const open = currentUser.role==='director' ? `openTaskModal('${task.id}')` : `openEmployeeUpdate('${task.id}')`; const confirm = currentUser.role==='director' && task.status==='Bajarildi' ? `<button class="btn small" onclick="event.stopPropagation();confirmTask('${task.id}')">Tasdiqlash</button>` : ''; return `<button class="btn secondary small" onclick="event.stopPropagation();${open}">Ochish</button>${confirm}`; }
-function kanbanCard(task, compact=false, draggable=true){ const c=byId(state.companies,task.companyId)||{}; const u=byId(state.users,task.assigneeId)||{}; const approved = task.status==='Direktor tasdiqladi' ? String(taskApprovedAt(task)).slice(0,10) : ''; const drag = draggable ? `draggable="true" ondragstart="startDragTask('${task.id}')" ondragend="endDragTask()"` : ''; return `<div class="kanban-card ${compact?'compact':''}" ${drag} ondblclick="openKanbanTask('${task.id}')"><div class="kanban-head"><span class="badge ${badgeClass(task.status,task)}">${isOverdue(task)?'Kechikkan':escapeHtml(task.status)}</span>${task.isQuick?'<span class="badge red">Tezkor</span>':''}</div><h4 title="${escapeHtml(task.title)}">${escapeHtml(task.title)}</h4><div class="kanban-meta" title="${escapeHtml(c.name||'-')}">${escapeHtml(c.name||'-')}</div><div class="kanban-meta">${escapeHtml(u.name||'-')} · ${deadlineText(task)}</div>${approved?`<div class="kanban-meta">Tasdiq: ${escapeHtml(approved)}</div>`:''}<div class="kanban-mini-actions">${kanbanMiniActions(task)}</div><div class="kanban-actions">${taskActions(task, currentUser.role==='director')}</div></div>`; }
+function kanbanCard(task, compact=false, draggable=true){ const c=byId(state.companies,task.companyId)||{}; const u=byId(state.users,task.assigneeId)||{}; const approved = task.status==='Direktor tasdiqladi' ? String(taskApprovedAt(task)).slice(0,10) : ''; const drag = draggable ? `draggable="true" ondragstart="startDragTask('${task.id}')" ondragend="endDragTask()"` : ''; return `<div class="kanban-card ${compact?'compact':''}" ${drag} ondblclick="openKanbanTask('${task.id}')"><div class="kanban-head"><span class="badge ${badgeClass(task.status,task)}">${isOverdue(task)?'Kechikkan':escapeHtml(task.status)}</span>${task.isQuick?'<span class="badge red">Tezkor</span>':''}</div><h4 title="${escapeHtml(task.title)}">${escapeHtml(task.title)}</h4><div class="kanban-meta" title="${escapeHtml(c.name||'-')}">${escapeHtml(c.name||'-')}</div><div class="kanban-meta">${escapeHtml(u.name||'-')} · ${deadlineWithCountdown(task)}</div>${approved?`<div class="kanban-meta">Tasdiq: ${escapeHtml(approved)}</div>`:''}<div class="kanban-mini-actions">${kanbanMiniActions(task)}</div><div class="kanban-actions">${taskActions(task, currentUser.role==='director')}</div></div>`; }
 function kanbanToolbar(){
   const companies = activeCompanies();
   const employees = activeUsers();
@@ -471,7 +559,7 @@ function tasksTable(tasks, directorMode){
   if(status) rows = rows.filter(t=>t.status===status);
   const key = taskPageKey();
   const page = paginateRows(rows, key);
-  return `<div class="toolbar"><div class="search-box"><input id="taskSearch" placeholder="Topshiriq, korxona yoki xodim bo‘yicha qidirish..." value="${escapeHtml(listFilters.taskSearch)}" onkeydown="if(event.key==='Enter'){event.preventDefault();applyTaskSearch();}"><button class="btn secondary small" onclick="applyTaskSearch()">Qidirish</button><button class="btn ghost small" onclick="clearTaskSearch()">Tozalash</button></div><select id="statusFilter" onchange="updateTaskStatus(this.value)"><option value="">Barcha holatlar</option>${statusList.map(s=>`<option ${listFilters.taskStatus===s?'selected':''}>${s}</option>`).join('')}</select></div>${!rows.length?'<div class="empty">Filtr bo‘yicha topshiriq topilmadi.</div>':`<div class="table-wrap"><table id="tasksTable"><thead><tr><th>Korxona</th><th>Topshiriq</th><th>Xodim</th><th>Muddat</th><th>Holat</th><th>Izoh</th><th>Amal</th></tr></thead><tbody>${page.rows.map(t=>{const c=byId(state.companies,t.companyId)||{}; const u=byId(state.users,t.assigneeId)||{}; const overdue=isOverdue(t); return `<tr data-status="${escapeHtml(t.status)}" data-search="${escapeHtml((c.name+' '+t.title+' '+u.name).toLowerCase())}"><td><b>${escapeHtml(c.name||'-')}</b></td><td>${t.isQuick?'<span class="badge red">Tezkor</span><br>':''}${escapeHtml(t.title)}<br><span class="soft-caption">${escapeHtml(t.type)} · ${escapeHtml(t.priority)}</span></td><td>${escapeHtml(u.name||'-')}</td><td>${deadlineText(t)} ${overdue?'<br><span class="badge red">Muddati o‘tgan</span>':''}</td><td><span class="badge ${badgeClass(t.status,t)}">${overdue?'Kechikkan':escapeHtml(t.status)}</span>${!t.isActive?'<br><span class="badge red">To‘xtatilgan</span>':''}</td><td>${escapeHtml(t.employeeNote || t.description || '-')}</td><td>${taskActions(t,directorMode)}</td></tr>`;}).join('')}</tbody></table></div>${paginationHtml(page,key)}`}`;
+  return `<div class="toolbar"><div class="search-box"><input id="taskSearch" placeholder="Topshiriq, korxona yoki xodim bo‘yicha qidirish..." value="${escapeHtml(listFilters.taskSearch)}" onkeydown="if(event.key==='Enter'){event.preventDefault();applyTaskSearch();}"><button class="btn secondary small" onclick="applyTaskSearch()">Qidirish</button><button class="btn ghost small" onclick="clearTaskSearch()">Tozalash</button></div><select id="statusFilter" onchange="updateTaskStatus(this.value)"><option value="">Barcha holatlar</option>${statusList.map(s=>`<option ${listFilters.taskStatus===s?'selected':''}>${s}</option>`).join('')}</select></div>${!rows.length?'<div class="empty">Filtr bo‘yicha topshiriq topilmadi.</div>':`<div class="table-wrap"><table id="tasksTable"><thead><tr><th>Korxona</th><th>Topshiriq</th><th>Xodim</th><th>Muddat</th><th>Holat</th><th>Izoh</th><th>Amal</th></tr></thead><tbody>${page.rows.map(t=>{const c=byId(state.companies,t.companyId)||{}; const u=byId(state.users,t.assigneeId)||{}; const overdue=isOverdue(t); return `<tr data-status="${escapeHtml(t.status)}" data-search="${escapeHtml((c.name+' '+t.title+' '+u.name).toLowerCase())}"><td><b>${escapeHtml(c.name||'-')}</b></td><td>${t.isQuick?'<span class="badge red">Tezkor</span><br>':''}${escapeHtml(t.title)}<br><span class="soft-caption">${escapeHtml(t.type)} · ${escapeHtml(t.priority)}</span></td><td>${escapeHtml(u.name||'-')}</td><td>${deadlineWithCountdown(t)} ${overdue?'<br><span class="badge red">Muddati o‘tgan</span>':''}</td><td><span class="badge ${badgeClass(t.status,t)}">${overdue?'Kechikkan':escapeHtml(t.status)}</span>${!t.isActive?'<br><span class="badge red">To‘xtatilgan</span>':''}</td><td>${escapeHtml(t.employeeNote || t.description || '-')}</td><td>${taskActions(t,directorMode)}</td></tr>`;}).join('')}</tbody></table></div>${paginationHtml(page,key)}`}`;
 }
 
 function taskActions(t,directorMode){
@@ -513,7 +601,7 @@ function groupReportRows(tasks, type){
 function reportSummaryCards(tasks){ const total=tasks.length, done=tasks.filter(t=>isDone(t.status)).length, progress=tasks.filter(t=>t.status==='Bajarilmoqda'||t.status==='Qabul qilindi').length, overdue=tasks.filter(isOverdue).length; const percent=total?Math.round(done/total*100):0; return `<div class="report-cards"><div class="report-card"><span class="muted">Jami</span><b>${total}</b></div><div class="report-card"><span class="muted">Bajarilgan</span><b>${done}</b></div><div class="report-card"><span class="muted">Jarayonda</span><b>${progress}</b></div><div class="report-card"><span class="muted">Kechikkan / foiz</span><b>${overdue} / ${percent}%</b></div></div>`; }
 function groupTable(title, rows){ if(!rows.length) return `<div class="empty">${title} bo‘yicha ma’lumot yo‘q.</div>`; return `<h3>${title}</h3><div class="table-wrap"><table><thead><tr><th>Nomi</th><th>Jami</th><th>Bajarildi</th><th>Jarayonda</th><th>Bajarilmadi</th><th>Kechikkan</th><th>Foiz</th></tr></thead><tbody>${rows.map(r=>{const pct=r.total?Math.round(r.done/r.total*100):0;return `<tr><td><b>${escapeHtml(r.name)}</b></td><td>${r.total}</td><td>${r.done}</td><td>${r.progress}</td><td>${r.failed}</td><td><span class="badge ${r.overdue?'red':'green'}">${r.overdue}</span></td><td>${pct}%</td></tr>`}).join('')}</tbody></table></div>`; }
 function reportOutputHtml(tasks){
-  const details = tasks.map(t=>{ const c=byId(state.companies,t.companyId)||{}; const u=byId(state.users,t.assigneeId)||{}; return `<tr><td>${escapeHtml(c.name||'-')}</td><td>${t.isQuick?'<span class="badge red">Tezkor</span><br>':''}<b>${escapeHtml(t.title)}</b><br><span class="muted">${escapeHtml(t.type)} · ${escapeHtml(t.priority)}</span></td><td>${escapeHtml(u.name||'-')}</td><td>${deadlineText(t)} ${isOverdue(t)?'<br><span class="badge red">Kechikkan</span>':''}</td><td><span class="badge ${badgeClass(t.status,t)}">${escapeHtml(t.status)}</span></td><td><button class="btn ghost small" onclick="openTaskHistory('${t.id}')">Tarix</button></td></tr>`; }).join('');
+  const details = tasks.map(t=>{ const c=byId(state.companies,t.companyId)||{}; const u=byId(state.users,t.assigneeId)||{}; return `<tr><td>${escapeHtml(c.name||'-')}</td><td>${t.isQuick?'<span class="badge red">Tezkor</span><br>':''}<b>${escapeHtml(t.title)}</b><br><span class="muted">${escapeHtml(t.type)} · ${escapeHtml(t.priority)}</span></td><td>${escapeHtml(u.name||'-')}</td><td>${deadlineWithCountdown(t)} ${isOverdue(t)?'<br><span class="badge red">Kechikkan</span>':''}</td><td><span class="badge ${badgeClass(t.status,t)}">${escapeHtml(t.status)}</span></td><td><button class="btn ghost small" onclick="openTaskHistory('${t.id}')">Tarix</button></td></tr>`; }).join('');
   return `${reportSummaryCards(tasks)}${groupTable('Korxonalar kesimida', groupReportRows(tasks,'company'))}${groupTable('Xodimlar kesimida', groupReportRows(tasks,'employee'))}<h3>Topshiriqlar ro‘yxati</h3>${tasks.length?`<div class="table-wrap"><table><thead><tr><th>Korxona</th><th>Topshiriq</th><th>Xodim</th><th>Muddat</th><th>Status</th><th>Tarix</th></tr></thead><tbody>${details}</tbody></table></div>`:'<div class="empty">Filtr bo‘yicha topshiriq topilmadi.</div>'}`;
 }
 function renderReportResults(){ const out=$('reportOutput'); if(out) out.innerHTML = reportOutputHtml(getReportFilteredTasks()); }
@@ -694,7 +782,7 @@ function openTaskModal(id=null, quick=false, copySource=null){
 }
 function applyTaskTemplate(){ const id=$('m_template').value; if(!id) return; const tpl=byId(state.taskTemplates,id); if(!tpl) return; $('m_title').value=tpl.title; $('m_type').value=tpl.type; $('m_priority').value=tpl.priority; $('m_description').value=tpl.description||''; $('m_deadline').value=addDaysISO(tpl.defaultDays); }
 async function saveTask(){ try{ const companyIds=selectedModalCompanyIds(); const singleCompany=$('m_company')?.value || companyIds[0] || ''; if(!editingTaskId && !singleCompany && !companyIds.length) return alert('Kamida bitta korxona tanlang.'); const payload={templateId:$('m_template').value||null,companyId:singleCompany,companyIds:companyIds.length?companyIds:undefined,assigneeId:$('m_assignee').value,title:$('m_title').value,type:$('m_type').value,deadline:$('m_deadline').value,priority:$('m_priority').value,status:$('m_status').value,description:$('m_description').value,directorNote:withTaskTimeMarker($('m_directorNote').value, $('m_deadline_time')?.value || ''),isQuick:modalMode==='quick',isActive:$('m_active').value==='true',createdBy:currentUser.id,actorId:currentUser.id}; if(!editingTaskId && companyIds.length>1){ await api('/api/tasks/bulk',{method:'POST',body:JSON.stringify(payload)}); } else { await api(editingTaskId?'/api/tasks/'+editingTaskId:'/api/tasks',{method:editingTaskId?'PUT':'POST',body:JSON.stringify(payload)}); } await loadData(); closeModal(); render(); }catch(err){ alert(err.message); } }
-function openEmployeeUpdate(id){ const t=byId(state.tasks,id); if(!t) return; editingTaskId=id; showModal('Topshiriq holatini belgilash', `<p><b>${escapeHtml(byId(state.companies,t.companyId)?.name||'-')}</b></p><h3 style="margin-top:0">${escapeHtml(t.title)}</h3><p style="color:var(--muted)">${escapeHtml(t.description||'')}</p><div class="form-grid"><div><label>Status</label><select id="e_status">${['Qabul qilindi','Bajarilmoqda','Bajarildi','Bajarilmadi'].map(x=>`<option ${x===t.status?'selected':''}>${x}</option>`).join('')}</select></div><div><label>Muddat</label><input value="${escapeHtml(t.deadline)}" disabled></div><div class="full"><label>Izoh</label><textarea id="e_note">${escapeHtml(t.employeeNote||'')}</textarea></div></div>${taskInlineHistoryBlock(id)}<div class="actions"><button class="btn ghost" onclick="closeModal()">Bekor qilish</button><button class="btn" onclick="saveEmployeeUpdate()">Saqlash</button></div>`); setTimeout(()=>loadInlineTaskHistory(id),0); }
+function openEmployeeUpdate(id){ const t=byId(state.tasks,id); if(!t) return; editingTaskId=id; showModal('Topshiriq holatini belgilash', `<p><b>${escapeHtml(byId(state.companies,t.companyId)?.name||'-')}</b></p><h3 style="margin-top:0">${escapeHtml(t.title)}</h3><p style="color:var(--muted)">${escapeHtml(t.description||'')}</p><div class="form-grid"><div><label>Status</label><select id="e_status">${['Qabul qilindi','Bajarilmoqda','Bajarildi','Bajarilmadi'].map(x=>`<option ${x===t.status?'selected':''}>${x}</option>`).join('')}</select></div><div><label>Muddat</label><div class="hint" style="margin:0">${deadlineWithCountdown(t)}</div></div><div class="full"><label>Izoh</label><textarea id="e_note">${escapeHtml(t.employeeNote||'')}</textarea></div></div>${taskInlineHistoryBlock(id)}<div class="actions"><button class="btn ghost" onclick="closeModal()">Bekor qilish</button><button class="btn" onclick="saveEmployeeUpdate()">Saqlash</button></div>`); setTimeout(()=>loadInlineTaskHistory(id),0); }
 async function saveEmployeeUpdate(){ try{ await api('/api/tasks/'+editingTaskId,{method:'PUT',body:JSON.stringify({status:$('e_status').value,employeeNote:$('e_note').value,actorId:currentUser.id})}); await loadData(); closeModal(); render(); }catch(err){ alert(err.message); } }
 async function confirmTask(id){ try{ await api('/api/tasks/'+id+'/confirm',{method:'POST',body:JSON.stringify({actorId:currentUser.id,directorNote:'Tasdiqlandi.'})}); await loadData(); render(); }catch(err){ alert(err.message); } }
 async function deleteTask(){ if(!confirm('Topshiriq o‘chirilsinmi?')) return; try{ await api('/api/tasks/'+editingTaskId,{method:'DELETE'}); await loadData(); closeModal(); render(); }catch(err){ alert(err.message); } }
