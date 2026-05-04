@@ -105,6 +105,12 @@ body{font-family:"Manrope",Inter,Arial,sans-serif} h1,h2,h3,h4,b,.btn,.menu butt
 .history-loading,.history-empty{font-size:12px;color:var(--text-soft);padding:10px;text-align:center}.history-list{display:grid;gap:8px}.history-item{border:1px solid var(--line);border-radius:14px;background:var(--card);padding:10px 11px}
 .history-item-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}.history-action{font-weight:900;color:var(--text);font-size:12px}.history-date{font-size:11px;color:var(--text-soft);white-space:nowrap}.history-meta{font-size:11.5px;color:var(--text-soft);line-height:1.45}.history-note{margin-top:5px;font-size:12px;color:var(--text);line-height:1.45;white-space:pre-wrap}.history-status-line{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 
+/* Stage 7.7 — chiroyli dashboard grafiklari: gorizontal korxona yuklamasi va xodimlar stacked natijasi */
+.stage77-grid{grid-template-columns:1fr 1fr;align-items:stretch}.stage77-card{overflow:hidden}.stage77-card .chart-head{margin-bottom:16px}.stage77-legend{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--text-soft);font-weight:800}.stage77-dot{width:10px;height:10px;border-radius:999px;display:inline-block}.stage77-dot.done{background:#14c97a}.stage77-dot.progress{background:#4f7cff}.stage77-dot.overdue{background:#ef5350}.hbar-chart{display:grid;gap:11px;max-height:430px;overflow:auto;padding-right:4px;scrollbar-width:thin}.hbar-row{display:grid;grid-template-columns:minmax(190px,260px) 1fr 46px;gap:12px;align-items:center}.hbar-label{font-size:12.5px;font-weight:900;color:var(--text);line-height:1.28;word-break:break-word}.hbar-track{height:26px;border-radius:999px;background:rgba(148,163,184,.18);overflow:hidden;position:relative;box-shadow:inset 0 0 0 1px rgba(148,163,184,.10)}.hbar-fill{height:100%;min-width:26px;border-radius:999px;background:linear-gradient(90deg,#4f7cff,#14c97a);display:flex;align-items:center;justify-content:flex-end;padding-right:9px;color:#fff;font-size:12px;font-weight:900;box-shadow:0 8px 18px rgba(79,124,255,.18)}.hbar-value{font-size:13px;font-weight:900;color:var(--text);text-align:right}.stacked-chart{display:grid;gap:13px;max-height:430px;overflow:auto;padding-right:4px;scrollbar-width:thin}.stack-row{display:grid;grid-template-columns:minmax(170px,230px) 1fr;gap:12px;align-items:center}.stack-label{font-size:12.5px;font-weight:900;color:var(--text);line-height:1.28;word-break:break-word}.stack-sub{display:block;margin-top:3px;font-size:11px;font-weight:800;color:var(--text-soft)}.stack-track{height:30px;display:flex;border-radius:999px;overflow:hidden;background:rgba(148,163,184,.16);box-shadow:inset 0 0 0 1px rgba(148,163,184,.10)}.stack-seg{height:100%;min-width:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:900;transition:.18s ease}.stack-seg.done{background:#14c97a}.stack-seg.progress{background:#4f7cff}.stack-seg.overdue{background:#ef5350}.stack-seg em{font-style:normal;text-shadow:0 1px 4px rgba(0,0,0,.22)}.chart-total-note{margin-top:12px;font-size:12px;color:var(--text-soft);font-weight:800}.stage77-empty{padding:24px;text-align:center;border:1px dashed var(--line);border-radius:18px;color:var(--text-soft);background:rgba(148,163,184,.06)}
+@media(max-width:1180px){.stage77-grid{grid-template-columns:1fr}}
+@media(max-width:640px){.hbar-row,.stack-row{grid-template-columns:1fr;gap:7px}.hbar-value{text-align:left}.hbar-track{height:24px}.stack-track{height:28px}.stage77-card .chart-head{flex-direction:column;align-items:flex-start}.stage77-legend{gap:8px}.hbar-chart,.stacked-chart{max-height:none}}
+
+
 @media(max-width:920px){.kanban-board.compact-board .kanban-col{max-height:none}.kanban-board.compact-board .kanban-list{max-height:420px}.kanban-toolbar .field-mini,.kanban-toolbar .field-search{flex:1 1 100%;min-width:0}.kanban-toolbar-actions{width:100%}.kanban-toolbar-actions .btn{flex:1}}
 
   </style>
@@ -184,10 +190,30 @@ function tasksByUpcomingDays(tasks, days=7){
   }
   return {labels, values};
 }
-function tasksByCompanies(tasks, limit=6){
+function tasksByCompanies(tasks, limit=10){
   const map = new Map();
-  tasks.forEach(t=>{ const name = byId(state.companies,t.companyId)?.name || '-'; map.set(name,(map.get(name)||0)+1); });
-  return [...map.entries()].map(([label,value])=>({label,value})).sort((a,b)=>b.value-a.value).slice(0,limit);
+  tasks.forEach(t=>{
+    const c = byId(state.companies,t.companyId) || {};
+    const label = c.name || '-';
+    const current = map.get(label) || { label, value:0 };
+    current.value += 1;
+    map.set(label,current);
+  });
+  return [...map.values()].sort((a,b)=>b.value-a.value || String(a.label).localeCompare(String(b.label))).slice(0,limit);
+}
+function employeePerformance(tasks, limit=10){
+  const map = new Map();
+  state.users.filter(u=>u.role==='employee').forEach(u=>map.set(u.id,{ id:u.id, label:u.name || '-', done:0, progress:0, overdue:0, total:0 }));
+  tasks.forEach(t=>{
+    const id = t.assigneeId || 'none';
+    if(!map.has(id)) map.set(id,{ id, label: byId(state.users,id)?.name || 'Biriktirilmagan', done:0, progress:0, overdue:0, total:0 });
+    const row = map.get(id);
+    if(isOverdue(t)) row.overdue += 1;
+    else if(isDone(t.status)) row.done += 1;
+    else if(t.status !== 'Bekor qilindi' && t.status !== 'Bajarilmadi') row.progress += 1;
+    row.total = row.done + row.progress + row.overdue;
+  });
+  return [...map.values()].filter(x=>x.total>0).sort((a,b)=>b.done-a.done || b.total-a.total || String(a.label).localeCompare(String(b.label))).slice(0,limit);
 }
 function svgLineChart(data){
   const width=520, height=220, pad=30, max=Math.max(...data.values,1);
@@ -199,16 +225,31 @@ function svgLineChart(data){
   const grid = [0,1,2,3,4].map(i=>{ const y = pad + i*(height-pad*2)/4; return `<line x1="${pad}" y1="${y}" x2="${width-pad}" y2="${y}" />`; }).join('');
   return `<svg viewBox="0 0 ${width} ${height}" class="chart-svg line-chart"><g class="grid">${grid}</g><path class="area" d="${area}"/><polyline class="line" points="${points}"/>${dots}<g class="labels">${labels}</g></svg>`;
 }
-function svgBarsChart(items){
-  const width=520, height=220, pad=28, barW=44, gap=22, max=Math.max(...items.map(x=>x.value),1);
-  return `<svg viewBox="0 0 ${width} ${height}" class="chart-svg bars-chart"><defs><linearGradient id="barsGrad" x1="0" y1="1" x2="0" y2="0"><stop offset="0%"/><stop offset="100%"/></linearGradient></defs>${items.map((item,i)=>{ const x=pad+i*(barW+gap)+14; const h=(item.value/max)*(height-70); const y=height-42-h; return `<g><rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="12"></rect><text x="${x+barW/2}" y="${y-8}" text-anchor="middle" class="value">${item.value}</text><text x="${x+barW/2}" y="${height-14}" text-anchor="middle" class="label">${escapeHtml(item.label).slice(0,8)}</text></g>`; }).join('')}</svg>`;
+function horizontalCompanyChart(items){
+  if(!items.length) return '<div class="stage77-empty">Korxonalar bo‘yicha ma’lumot yo‘q.</div>';
+  const max = Math.max(...items.map(x=>x.value),1);
+  const total = items.reduce((s,x)=>s+x.value,0);
+  return '<div class="hbar-chart">'+items.map(item=>{
+    const w = Math.max(6, Math.round((item.value/max)*100));
+    return `<div class="hbar-row" title="${escapeHtml(item.label)} — ${item.value} ta"><div class="hbar-label">${escapeHtml(item.label)}</div><div class="hbar-track"><div class="hbar-fill" style="width:${w}%"><span>${item.value}</span></div></div><div class="hbar-value">${item.value}</div></div>`;
+  }).join('')+'</div><div class="chart-total-note">Top 10 korxona · jami '+total+' ta topshiriq</div>';
+}
+function stackedEmployeeChart(items){
+  if(!items.length) return '<div class="stage77-empty">Xodimlar bo‘yicha ma’lumot yo‘q.</div>';
+  return '<div class="stacked-chart">'+items.map(item=>{
+    const total = Math.max(item.total,1);
+    const doneW = item.done ? Math.max(7, Math.round(item.done/total*100)) : 0;
+    const progressW = item.progress ? Math.max(7, Math.round(item.progress/total*100)) : 0;
+    const overdueW = item.overdue ? Math.max(7, Math.round(item.overdue/total*100)) : 0;
+    return `<div class="stack-row" title="${escapeHtml(item.label)} — Bajarilgan: ${item.done}, Jarayonda: ${item.progress}, Kechikkan: ${item.overdue}"><div class="stack-label">${escapeHtml(item.label)}<span class="stack-sub">Jami: ${item.total}</span></div><div class="stack-track">${item.done?`<span class="stack-seg done" style="width:${doneW}%"><em>${item.done}</em></span>`:''}${item.progress?`<span class="stack-seg progress" style="width:${progressW}%"><em>${item.progress}</em></span>`:''}${item.overdue?`<span class="stack-seg overdue" style="width:${overdueW}%"><em>${item.overdue}</em></span>`:''}</div></div>`;
+  }).join('')+'</div>';
 }
 function analyticsSection(tasks){
   const employeeItems=groupedByEmployee(tasks); const typeItems=groupedByType(tasks); const total=Math.max(tasks.length,1);
-  const trend = tasksByUpcomingDays(tasks, 7);
-  const companies = tasksByCompanies(tasks, 6);
-  return '<div class="analytics-grid"><div class="panel analytics-card wide"><h4>Holatlar taqsimoti</h4>'+donutChart(tasks)+'</div><div class="panel analytics-card"><h4>Mas’ul xodimlar</h4>'+chartBars(employeeItems,total)+'</div><div class="panel analytics-card"><h4>Topshiriq turlari</h4>'+chartBars(typeItems,total)+'</div></div>'+
-         '<div class="charts-grid"><div class="panel analytics-card chart-card"><div class="chart-head"><h4>Keyingi 7 kun muddat grafigi</h4><span class="soft-caption">Kunlar kesimida topshiriqlar soni</span></div>'+svgLineChart(trend)+'</div><div class="panel analytics-card chart-card"><div class="chart-head"><h4>Korxonalar bo‘yicha yuklama</h4><span class="soft-caption">Eng faol korxonalar</span></div>'+svgBarsChart(companies)+'</div></div>';
+  const companies = tasksByCompanies(tasks, 10);
+  const employeeStats = employeePerformance(tasks, 10);
+  return '<div class="analytics-grid"><div class="panel analytics-card wide"><h4>Holatlar taqsimoti</h4>'+donutChart(tasks)+'</div><div class="panel analytics-card"><h4>Mas’ul xodimlar</h4>'+chartBars(employeeItems,total)+'</div><div class="panel analytics-card"><h4>Topshiriq turlari</h4>'+chartBars(typeItems,total)+'</div></div>'+ 
+         '<div class="charts-grid stage77-grid"><div class="panel analytics-card chart-card stage77-card"><div class="chart-head"><div><h4>Korxonalar bo‘yicha yuklama</h4><span class="soft-caption">Top 10 korxona — to‘liq nomlar bilan</span></div></div>'+horizontalCompanyChart(companies)+'</div><div class="panel analytics-card chart-card stage77-card"><div class="chart-head"><div><h4>Xodimlar bo‘yicha bajarilgan ishlar</h4><span class="soft-caption">Bajarilgan, jarayonda va kechikkan topshiriqlar</span></div><div class="stage77-legend"><span><i class="stage77-dot done"></i> Bajarilgan</span><span><i class="stage77-dot progress"></i> Jarayonda</span><span><i class="stage77-dot overdue"></i> Kechikkan</span></div></div>'+stackedEmployeeChart(employeeStats)+'</div></div>';
 }
 
 async function api(path, options={}){
