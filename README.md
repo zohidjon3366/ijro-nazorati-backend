@@ -1,71 +1,50 @@
-# Ijro nazorati backend — Stage 3
+# Ijro Nazorati — Stage 7.5 iframe deploy patch
 
-Stage 3 quyidagilarni qo'shadi:
+Bu patch Tilda T123 blokidagi **“juda ko‘p matn”** xatosini hal qiladi.
 
-- Topshiriq tarixi endpointi va HTML ichida ko'rish
-- Hisobotlar bo'limi
-- Korxona/xodim/status/muddat/tezkor/kechikkan filtrlar
-- Excel uchun CSV eksport endpointi
+## Nima o‘zgardi
 
-## Render Environment Variables
+- Dastur HTML/JS/CSS fayli Render backend ichidagi `public/ijro-nazorati.html` faylidan ochiladi.
+- Tilda ichiga endi katta HTML kod emas, faqat qisqa `iframe` qo‘yiladi.
+- Supabase baza tuzilmasi o‘zgarmaydi.
+- Jadval/ustun/migration qo‘shilmaydi.
+- Stage 7.5 Compact Kanban funksiyalari saqlangan.
 
-```text
-TELEGRAM_BOT_TOKEN=BotFather token
-SUPABASE_URL=https://PROJECT_ID.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=Supabase secret/service_role key
-ALLOWED_ORIGIN=*
+## Render URL
+
+Deploydan keyin dastur shu manzilda ochiladi:
+
+```
+https://ijro-nazorati-backend.onrender.com/app
 ```
 
-## Yangi endpoint
+Yoki:
 
-```text
-GET /api/reports/tasks.csv
+```
+https://ijro-nazorati-backend.onrender.com/ijro
 ```
 
-Filtr query parametrlari: `companyId`, `assigneeId`, `status`, `dateFrom`, `dateTo`, `overdue=true`, `quick=true/false`.
+## Tilda iframe kodi
 
+T123 / HTML blokka faqat shu kodni qo‘ying:
 
-## Stage 4: Topshiriq ilovalari
-
-Qo‘shimcha endpointlar:
-
-```text
-GET    /api/tasks/:id/attachments
-POST   /api/tasks/:id/attachments
-DELETE /api/attachments/:id
+```html
+<div style="width:100%;min-height:100vh;margin:0;padding:0;overflow:hidden;">
+  <iframe
+    src="https://ijro-nazorati-backend.onrender.com/app"
+    style="width:100%;height:100vh;border:0;display:block;"
+    loading="eager"
+    allow="clipboard-read; clipboard-write">
+  </iframe>
+</div>
 ```
 
-`POST /api/tasks/:id/attachments` `multipart/form-data` qabul qiladi:
+## Joylash tartibi
 
-- `file` — yuklanadigan fayl
-- `actorId` — foydalanuvchi ID
-
-Render Environment Variables:
-
-```text
-ATTACHMENTS_BUCKET=task-attachments
-MAX_ATTACHMENT_SIZE_MB=25
-```
-
-Supabase’da `task_attachments` jadvali va `task-attachments` Storage bucket yaratilgan bo‘lishi kerak.
-
-
-## Stage 7 — Tezkor kirish optimizatsiyasi
-
-Qo‘shildi:
-- `POST /api/auth/login?bootstrap=false` — loginni tezroq bajaradi, katta bootstrap ma’lumotlar alohida yuklanadi.
-- `/health` endpointi vaqt qaytaradi, Tilda sahifasi login oynasida backendni oldindan uyg‘otadi.
-- Eski HTML bilan moslik saqlangan: `bootstrap=false` bo‘lmasa eski javob formati ishlaydi.
-
-Render Free ishlatilsa, servis uxlab qolishi mumkin. Eng kuchli tezlik uchun Render paid instance yoki UptimeRobot orqali `https://ijro-nazorati-backend.onrender.com/health` manziliga har 5 daqiqada ping tavsiya qilinadi.
-
-
-## Stage 7.1 — Ommaviy topshiriq, nusxalash va tezlik
-
-Qo‘shildi:
-- Kunduzgi rejimda oq shriftlar olib tashlandi, asosiy yozuvlar quyuq rangga o‘tkazildi.
-- Korxonalar ro‘yxatida checkbox orqali bir nechta korxonani belgilab, bitta topshiriqni har bir korxonaga alohida yaratish imkoniyati qo‘shildi.
-- Topshiriq kartasi/jadvalidan `Nusxalash` tugmasi qo‘shildi. Nusxada status `Yangi`, muddat bugungi sana bo‘ladi.
-- `POST /api/tasks/bulk` endpointi qo‘shildi. Body ichida `companyIds` massivi yuboriladi.
-- `/api/warmup` endpointi qo‘shildi: login oynasi ochilganda backend bilan birga Supabase ulanishini ham oldindan uyg‘otadi.
-- Frontend bootstrap ma’lumotlarini sessiya cache’iga saqlaydi va keyingi kirishda panelni tezroq ko‘rsatadi, so‘ng fonda yangilaydi.
+1. Backend repo ichidagi `server.js`, `package.json`, `README.md` fayllarini ushbu patchdagi fayllar bilan almashtiring.
+2. `public/ijro-nazorati.html` faylini ham repo ichiga qo‘shing.
+3. GitHub’ga commit/push qiling.
+4. Render deploy tugashini kuting.
+5. `https://ijro-nazorati-backend.onrender.com/app` ochilishini tekshiring.
+6. Tilda T123 blokka faqat yuqoridagi iframe kodni qo‘ying.
+7. Publish qiling va Ctrl+F5 bilan tekshiring.
