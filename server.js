@@ -3,15 +3,28 @@ import cors from 'cors';
 import * as cheerio from 'cheerio';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const APP_HTML_PATH = path.join(__dirname, 'public', 'ijro-nazorati.html');
 app.use(cors({
   origin: process.env.ALLOWED_ORIGIN || '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Accept']
 }));
 app.use(express.json({ limit: '5mb' }));
+
+// Stage 7.5 iframe mode: serve the full web app from Render so Tilda T123 only needs a tiny iframe code.
+// This does not change Supabase database structure.
+app.get(['/app', '/app/', '/ijro', '/ijro/'], (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  return res.sendFile(APP_HTML_PATH);
+});
+
 
 const upload = multer({
   storage: multer.memoryStorage(),
