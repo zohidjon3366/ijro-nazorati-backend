@@ -1,6 +1,6 @@
 {
   "name": "tilda-ijro-nazorati-backend-stage7-5-iframe",
-  "version": "7.5.1",
+  "version": "7.9.1",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -14,5 +14,6 @@
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "multer": "^1.4.5-lts.1"
-  }
+  },
+  "description": "Ijro Nazorati Stage 7.9 rebuilt: full dashboard features, Telegram reminders, #z Telegram group/voice urgent tasks, iframe app route without DB schema changes"
 }
