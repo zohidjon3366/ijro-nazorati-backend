@@ -36,6 +36,13 @@ const upload = multer({
 
 const PORT = process.env.PORT || 3000;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_TASK_COMMAND = (process.env.TELEGRAM_TASK_COMMAND || '#z').trim() || '#z';
+const TELEGRAM_VOICE_MODE = (process.env.TELEGRAM_VOICE_MODE || 'command').toLowerCase(); // command | all
+const TELEGRAM_DEFAULT_DEADLINE_HOURS = Math.max(1, Number(process.env.TELEGRAM_DEFAULT_DEADLINE_HOURS || 24));
+const TELEGRAM_PENDING_MINUTES = Math.max(1, Number(process.env.TELEGRAM_PENDING_MINUTES || 5));
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const OPENAI_TRANSCRIPTION_MODEL = process.env.OPENAI_TRANSCRIPTION_MODEL || 'whisper-1';
+const OPENAI_TRANSCRIPTION_LANGUAGE = process.env.OPENAI_TRANSCRIPTION_LANGUAGE || 'uz';
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const ATTACHMENTS_BUCKET = process.env.ATTACHMENTS_BUCKET || 'task-attachments';
@@ -308,6 +315,307 @@ async function sendTelegramMessage(toChatId, text) {
   if (!tgResponse.ok || !json?.ok) return { ok: false, error: 'Telegram xabarni qabul qilmadi', details: json };
   return { ok: true, telegram: json.result };
 }
+
+
+// ================= Stage 7.9 rebuilt — Telegram group/voice to urgent task =================
+// Baza strukturasini o'zgartirmaydi. Guruh->korxona va default xodim bog'lanishi Render env orqali beriladi.
+const telegramPendingTasks = new Map();
+function parseJsonEnv(name, fallback = {}) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  try { return JSON.parse(raw); } catch (err) { console.warn(`${name} JSON parse failed:`, err.message); return fallback; }
+}
+function telegramCompanyMap() { return parseJsonEnv('TELEGRAM_GROUP_COMPANY_MAP', {}); }
+function telegramDefaultAssigneeMap() { return parseJsonEnv('TELEGRAM_DEFAULT_ASSIGNEE_MAP', {}); }
+function telegramAdminMap() { return parseJsonEnv('TELEGRAM_ADMIN_CHAT_MAP', {}); }
+function normalizeTelegramCommand(value) {
+  const cmd = cleanText(value || TELEGRAM_TASK_COMMAND || '#z').toLowerCase();
+  return cmd.startsWith('#') || cmd.startsWith('/') ? cmd : '#' + cmd;
+}
+function telegramCommandVariants() {
+  const c = normalizeTelegramCommand(TELEGRAM_TASK_COMMAND);
+  const bare = c.replace(/^#|^\//, '');
+  return [...new Set([c, '#' + bare, '/' + bare])];
+}
+function pendingTelegramKey(chatId, fromId) { return `${chatId || ''}|${fromId || 'anon'}`; }
+function rememberTelegramPending(chatId, fromId) {
+  telegramPendingTasks.set(pendingTelegramKey(chatId, fromId), Date.now() + TELEGRAM_PENDING_MINUTES * 60 * 1000);
+}
+function consumeTelegramPending(chatId, fromId) {
+  const key = pendingTelegramKey(chatId, fromId);
+  const exp = telegramPendingTasks.get(key);
+  telegramPendingTasks.delete(key);
+  return !!(exp && exp > Date.now());
+}
+function cleanupTelegramPending() {
+  const now = Date.now();
+  for (const [k, exp] of telegramPendingTasks.entries()) if (!exp || exp < now) telegramPendingTasks.delete(k);
+}
+function telegramMessageText(message) { return cleanText(message?.text || message?.caption || ''); }
+function stripTelegramCommand(text) {
+  let v = cleanText(text);
+  const lower = v.toLowerCase();
+  for (const cmd of telegramCommandVariants()) {
+    if (lower === cmd) return '';
+    if (lower.startsWith(cmd + ' ')) return cleanText(v.slice(cmd.length));
+    if (lower.startsWith(cmd + '\n')) return cleanText(v.slice(cmd.length));
+  }
+  return v;
+}
+function isTelegramTaskCommand(text) {
+  const lower = cleanText(text).toLowerCase();
+  if (!lower) return false;
+  return telegramCommandVariants().some(cmd => lower === cmd || lower.startsWith(cmd + ' ') || lower.startsWith(cmd + '\n'));
+}
+function telegramSenderName(from = {}) {
+  return cleanText([from.first_name, from.last_name].filter(Boolean).join(' ') || from.username || from.id || '');
+}
+function isoDateFromDate(d) { return d.toISOString().slice(0, 10); }
+function hhmmFromDate(d) { return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
+function parseTelegramDeadline(text) {
+  const src = cleanText(text);
+  const now = new Date();
+  let date = '';
+  let time = '';
+  let m = src.match(/(?:muddat|муддат|deadline)\s*[:\-]?\s*(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})(?:\s+(\d{1,2}:\d{2}))?/i) || src.match(/(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})(?:\s+(\d{1,2}:\d{2}))?/);
+  if (m) { date = `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`; if (m[4]) time = m[4]; }
+  if (!date) {
+    m = src.match(/(?:muddat|муддат|deadline)\s*[:\-]?\s*(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})(?:\s+(\d{1,2}:\d{2}))?/i) || src.match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})(?:\s+(\d{1,2}:\d{2}))?/);
+    if (m) { date = `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`; if (m[4]) time = m[4]; }
+  }
+  const timeMatch = src.match(/(?:soat|соат|time|vaqt)\s*[:\-]?\s*(\d{1,2}:\d{2})/i) || src.match(/\b(\d{1,2}:\d{2})\b/);
+  if (!time && timeMatch) time = timeMatch[1];
+  if (!date) {
+    if (/\b(ertaga|эртага|tomorrow)\b/i.test(src)) { const d = new Date(now); d.setDate(d.getDate()+1); date = isoDateFromDate(d); }
+    else if (/\b(bugun|бугун|today)\b/i.test(src)) { date = isoDateFromDate(now); }
+  }
+  if (!date && time) {
+    const d = new Date(now);
+    const [h, mi] = time.split(':').map(Number);
+    d.setHours(h, mi, 0, 0);
+    if (d.getTime() < now.getTime()) d.setDate(d.getDate()+1);
+    date = isoDateFromDate(d);
+  }
+  if (!date) {
+    const d = new Date(now.getTime() + TELEGRAM_DEFAULT_DEADLINE_HOURS * 60 * 60 * 1000);
+    date = isoDateFromDate(d);
+    if (!time) time = hhmmFromDate(d);
+  }
+  return { date, time };
+}
+function telegramTitleFromText(text) {
+  const cleaned = cleanText(text).split(/\n+/).map(cleanText).filter(Boolean)
+    .filter(line => !/^(muddat|муддат|deadline|mas.?ul|мас.?ул|xodim|ходим)\s*[:\-]/i.test(line));
+  let line = cleaned[0] || cleanText(text) || 'Telegramdan kelgan shoshilinch topshiriq';
+  line = line.replace(/^topshiriq\s*[:\-]/i, '').replace(/^вазифа\s*[:\-]/i, '').trim();
+  if (line.length > 160) line = line.slice(0, 157).trim() + '...';
+  return line || 'Telegramdan kelgan shoshilinch topshiriq';
+}
+function formatTelegramSourceNote(message, rawText, transcript, deadlineTime) {
+  const from = telegramSenderName(message.from || {});
+  const chatTitle = cleanText(message.chat?.title || message.chat?.username || message.chat?.id || '');
+  const lines = [];
+  if (deadlineTime) lines.push(`[Soat: ${deadlineTime}]`);
+  lines.push('Manba: Telegram');
+  if (chatTitle) lines.push(`Guruh: ${chatTitle}`);
+  if (message.chat?.id) lines.push(`Guruh ID: ${message.chat.id}`);
+  if (from) lines.push(`Yuboruvchi: ${from}`);
+  if (message.message_id) lines.push(`Telegram message_id: ${message.message_id}`);
+  if (rawText) lines.push(`Matn: ${cleanText(rawText)}`);
+  if (transcript) lines.push(`Transkript: ${cleanText(transcript)}`);
+  return lines.join('\n');
+}
+async function getTelegramFile(fileId) {
+  if (!TELEGRAM_BOT_TOKEN) throw new Error('TELEGRAM_BOT_TOKEN env sozlanmagan');
+  const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`);
+  const json = await r.json().catch(() => null);
+  if (!r.ok || !json?.ok || !json.result?.file_path) throw new Error('Telegram fayl yo‘lini qaytarmadi');
+  const fileUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${json.result.file_path}`;
+  const fr = await fetch(fileUrl);
+  if (!fr.ok) throw new Error(`Telegram fayl yuklab olinmadi: HTTP ${fr.status}`);
+  return { buffer: Buffer.from(await fr.arrayBuffer()), filePath: json.result.file_path };
+}
+async function transcribeTelegramVoice(buffer, mimeType = 'audio/ogg', fileName = 'voice.ogg') {
+  if (!OPENAI_API_KEY) return '';
+  try {
+    const form = new FormData();
+    form.append('file', new Blob([buffer], { type: mimeType || 'audio/ogg' }), fileName);
+    form.append('model', OPENAI_TRANSCRIPTION_MODEL);
+    if (OPENAI_TRANSCRIPTION_LANGUAGE) form.append('language', OPENAI_TRANSCRIPTION_LANGUAGE);
+    const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }, body: form });
+    const json = await r.json().catch(() => null);
+    if (!r.ok) { console.warn('Voice transcription failed:', json?.error?.message || `HTTP ${r.status}`); return ''; }
+    return cleanText(json?.text || '');
+  } catch (err) {
+    console.warn('Voice transcription error:', err.message);
+    return '';
+  }
+}
+async function uploadBufferAsTaskAttachment(taskId, buffer, originalName, mimeType, actorId) {
+  if (!buffer?.length) return null;
+  const safeName = sanitizeFileName(originalName || 'telegram_voice.ogg');
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '');
+  const randomPart = Math.random().toString(36).slice(2, 8);
+  const storagePath = `${taskId}/${stamp}_${randomPart}_${safeName}`;
+  const { error: uploadError } = await supabase.storage.from(ATTACHMENTS_BUCKET).upload(storagePath, buffer, { contentType: mimeType || 'application/octet-stream', upsert: false });
+  if (uploadError) throw uploadError;
+  const { data, error } = await supabase.from('task_attachments').insert({
+    task_id: taskId,
+    file_name: originalName || safeName,
+    file_path: storagePath,
+    file_type: mimeType || 'application/octet-stream',
+    file_size: buffer.length,
+    uploaded_by: actorId || null
+  }).select('*').single();
+  if (error) throw error;
+  await addTaskHistory(taskId, actorId, 'Telegram ovozli fayli ilova qilindi', null, null, originalName || safeName);
+  return data;
+}
+async function defaultAssigneeForCompany(companyId) {
+  const map = telegramDefaultAssigneeMap();
+  const explicit = map[companyId] || process.env.TELEGRAM_DEFAULT_ASSIGNEE_ID || '';
+  if (explicit) return explicit;
+  const { data, error } = await supabase.from('app_users').select('*').eq('role', 'employee').eq('is_active', true).order('created_at', { ascending: true }).limit(1);
+  if (error) throw error;
+  return data?.[0]?.id || null;
+}
+async function defaultActorId() {
+  const explicit = process.env.TELEGRAM_CREATED_BY_USER_ID || '';
+  if (explicit) return explicit;
+  const { data, error } = await supabase.from('app_users').select('*').eq('role', 'director').eq('is_active', true).order('created_at', { ascending: true }).limit(1);
+  if (error) throw error;
+  return data?.[0]?.id || null;
+}
+async function notifyDirectorsTelegramTask(task, message) {
+  try {
+    const [company, assignee, directorsRes] = await Promise.all([
+      getById('companies', task.company_id),
+      getById('app_users', task.assignee_id),
+      supabase.from('app_users').select('*').eq('role', 'director').eq('is_active', true).not('telegram_chat_id', 'is', null)
+    ]);
+    if (directorsRes.error) throw directorsRes.error;
+    const text = [
+      '⚡ Telegram guruhdan yangi shoshilinch topshiriq',
+      '',
+      `Korxona: ${company?.name || '-'}`,
+      `Mas’ul: ${assignee?.full_name || '-'}`,
+      `Topshiriq: ${task.title || '-'}`,
+      `Muddat: ${taskDeadlineTextServer(task) || '-'}`,
+      `Guruh: ${message.chat?.title || message.chat?.id || '-'}`
+    ].join('\n');
+    await Promise.all((directorsRes.data || []).map(d => sendTelegramMessage(d.telegram_chat_id, text).catch(err => console.warn('Director telegram task notify failed:', err.message))));
+  } catch (err) { console.warn('Notify directors telegram task failed:', err.message); }
+}
+async function createUrgentTaskFromTelegram(message) {
+  ensureDb();
+  const chatId = String(message.chat?.id || '');
+  const companyId = telegramCompanyMap()[chatId];
+  if (!companyId) {
+    await sendTelegramMessage(chatId, `⚠️ Bu Telegram guruh hali korxonaga bog‘lanmagan. Render env TELEGRAM_GROUP_COMPANY_MAP ichiga ${chatId} ni korxona ID bilan bog‘lang.`).catch(()=>{});
+    return { ok: false, skipped: true, reason: 'company_map_missing', chatId };
+  }
+  let commandBody = stripTelegramCommand(telegramMessageText(message));
+  let transcript = '';
+  let voiceBuffer = null;
+  let voiceName = '';
+  let voiceMime = 'audio/ogg';
+  if (message.voice?.file_id) {
+    voiceMime = message.voice.mime_type || 'audio/ogg';
+    voiceName = `telegram_voice_${message.message_id || Date.now()}.ogg`;
+    const file = await getTelegramFile(message.voice.file_id);
+    voiceBuffer = file.buffer;
+    transcript = await transcribeTelegramVoice(voiceBuffer, voiceMime, voiceName);
+    if (!commandBody && transcript) commandBody = transcript;
+  }
+  const rawText = commandBody || transcript || telegramMessageText(message) || 'Telegramdan kelgan shoshilinch topshiriq';
+  const { date, time } = parseTelegramDeadline(rawText);
+  const assigneeId = await defaultAssigneeForCompany(companyId);
+  const actorId = await defaultActorId();
+  if (!assigneeId) {
+    await sendTelegramMessage(chatId, '⚠️ Telegram topshirig‘i qabul qilindi, lekin default mas’ul xodim topilmadi. Render env TELEGRAM_DEFAULT_ASSIGNEE_ID yoki TELEGRAM_DEFAULT_ASSIGNEE_MAP sozlang.').catch(()=>{});
+    return { ok: false, skipped: true, reason: 'assignee_missing' };
+  }
+  const directorNote = formatTelegramSourceNote(message, rawText, transcript, time);
+  const payload = {
+    company_id: companyId,
+    assignee_id: assigneeId,
+    template_id: null,
+    title: telegramTitleFromText(rawText),
+    type: 'Telegram',
+    deadline: date || null,
+    priority: 'Shoshilinch',
+    status: 'Yangi',
+    description: ['Manba: Telegram', transcript ? `Transkript: ${transcript}` : '', rawText ? `Matn: ${rawText}` : ''].filter(Boolean).join('\n'),
+    employee_note: '',
+    director_note: directorNote,
+    is_quick: true,
+    is_active: true,
+    created_by: actorId || null,
+    completed_at: null
+  };
+  const { data, error } = await supabase.from('tasks').insert(payload).select('*').single();
+  if (error) throw error;
+  await addTaskHistory(data.id, actorId, 'Telegramdan shoshilinch topshiriq yaratildi', null, data.status, rawText);
+  if (voiceBuffer) await uploadBufferAsTaskAttachment(data.id, voiceBuffer, voiceName, voiceMime, actorId).catch(err => console.warn('Telegram voice attachment failed:', err.message));
+  notifyTaskCreatedAsync(data);
+  notifyDirectorsTelegramTask(data, message);
+  await sendTelegramMessage(chatId, `✅ Telegram topshirig‘i rasmiylashtirildi\nTopshiriq: ${data.title}\nMuddat: ${taskDeadlineTextServer(data) || '-'}`).catch(()=>{});
+  return { ok: true, task: taskToClient(data) };
+}
+async function processTelegramUpdate(update = {}) {
+  cleanupTelegramPending();
+  const message = update.message || update.edited_message || null;
+  if (!message?.chat?.id) return { ok: true, ignored: true, reason: 'no_message' };
+  const chatId = String(message.chat.id);
+  const fromId = String(message.from?.id || 'anon');
+  const text = telegramMessageText(message);
+  const hasCommand = isTelegramTaskCommand(text);
+  if (hasCommand && !stripTelegramCommand(text) && !message.voice?.file_id) {
+    rememberTelegramPending(chatId, fromId);
+    await sendTelegramMessage(chatId, `#z qabul qilindi. Keyingi ${TELEGRAM_PENDING_MINUTES} daqiqa ichida matn yoki ovoz yuborsangiz, shoshilinch topshiriq sifatida rasmiylashtiriladi.`).catch(()=>{});
+    return { ok: true, pending: true };
+  }
+  const pending = consumeTelegramPending(chatId, fromId);
+  const shouldCreate = hasCommand || pending || (TELEGRAM_VOICE_MODE === 'all' && !!message.voice?.file_id);
+  if (!shouldCreate) return { ok: true, ignored: true, reason: 'no_command' };
+  return await createUrgentTaskFromTelegram(message);
+}
+
+app.post('/api/telegram/webhook', async (req, res) => {
+  try {
+    const result = await processTelegramUpdate(req.body || {});
+    return res.json({ ok: true, result });
+  } catch (err) {
+    console.warn('Telegram webhook failed:', err.message);
+    return res.status(err.status || 500).json({ ok: false, error: err.message || 'Telegram webhook xatosi' });
+  }
+});
+
+app.post('/api/telegram/set-webhook', async (req, res) => {
+  try {
+    if (!TELEGRAM_BOT_TOKEN) return res.status(400).json({ ok: false, error: 'TELEGRAM_BOT_TOKEN env sozlanmagan' });
+    const secret = process.env.TELEGRAM_WEBHOOK_SETUP_SECRET || '';
+    if (secret && req.body?.secret !== secret) return res.status(403).json({ ok: false, error: 'Webhook sozlash siri noto‘g‘ri' });
+    const baseUrl = cleanText(req.body?.baseUrl || process.env.PUBLIC_BACKEND_URL || process.env.RENDER_EXTERNAL_URL || '');
+    if (!baseUrl) return res.status(400).json({ ok: false, error: 'PUBLIC_BACKEND_URL env yoki body.baseUrl kerak' });
+    const webhookUrl = baseUrl.replace(/\/$/, '') + '/api/telegram/webhook';
+    const tgResponse = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: webhookUrl, allowed_updates: ['message', 'edited_message'] })
+    });
+    const json = await tgResponse.json().catch(() => null);
+    if (!tgResponse.ok || !json?.ok) return res.status(502).json({ ok: false, error: 'Telegram webhook o‘rnatilmadi', details: json });
+    return res.json({ ok: true, webhookUrl, telegram: json });
+  } catch (err) { return handleError(res, err); }
+});
+
+app.get('/api/telegram/webhook-info', async (req, res) => {
+  try {
+    if (!TELEGRAM_BOT_TOKEN) return res.status(400).json({ ok: false, error: 'TELEGRAM_BOT_TOKEN env sozlanmagan' });
+    const tgResponse = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo`);
+    const json = await tgResponse.json().catch(() => null);
+    return res.status(tgResponse.ok ? 200 : 502).json({ ok: !!json?.ok, telegram: json });
+  } catch (err) { return handleError(res, err); }
+});
 
 async function getById(table, id) {
   ensureDb();
@@ -919,6 +1227,184 @@ app.get('/api/reports/tasks.csv', async (req, res) => {
     return handleError(res, err);
   }
 });
+
+
+
+// ================= Stage 7.9 — bulk advanced, Excel report and Telegram reminders =================
+function htmlEscape(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]));
+}
+function extractTaskTimeServer(task) {
+  const text = String((task?.director_note || '') + '\n' + (task?.description || ''));
+  const m = text.match(/\[Soat:\s*(\d{2}:\d{2})\]/);
+  return m ? m[1] : '';
+}
+function taskDeadlineDateServer(task) {
+  if (!task?.deadline) return null;
+  const time = extractTaskTimeServer(task) || '23:59';
+  const d = new Date(String(task.deadline).slice(0, 10) + 'T' + time + ':00');
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+function taskDeadlineTextServer(task) {
+  const time = extractTaskTimeServer(task);
+  return `${task?.deadline || ''}${time ? ' ' + time : ''}`.trim();
+}
+async function getReportRowsFromDb(q = {}) {
+  ensureDb();
+  const [tasksRes, companiesRes, usersRes] = await Promise.all([
+    supabase.from('tasks').select('*').order('created_at', { ascending: false }),
+    supabase.from('companies').select('*'),
+    supabase.from('app_users').select('*')
+  ]);
+  for (const r of [tasksRes, companiesRes, usersRes]) if (r.error) throw r.error;
+  const companies = new Map((companiesRes.data || []).map(c => [c.id, c]));
+  const users = new Map((usersRes.data || []).map(u => [u.id, u]));
+  let tasks = tasksRes.data || [];
+  if (q.companyId) tasks = tasks.filter(t => t.company_id === q.companyId);
+  if (q.assigneeId) tasks = tasks.filter(t => t.assignee_id === q.assigneeId);
+  if (q.status) tasks = tasks.filter(t => t.status === q.status);
+  if (q.quick === 'true') tasks = tasks.filter(t => !!t.is_quick);
+  if (q.quick === 'false') tasks = tasks.filter(t => !t.is_quick);
+  if (q.dateFrom) tasks = tasks.filter(t => t.deadline && t.deadline >= q.dateFrom);
+  if (q.dateTo) tasks = tasks.filter(t => t.deadline && t.deadline <= q.dateTo);
+  if (q.overdue === 'true') tasks = tasks.filter(isTaskOverdueServer);
+  return { tasks, companies, users };
+}
+
+app.post('/api/tasks/bulk-advanced', async (req, res) => {
+  try {
+    ensureDb();
+    const rawCompanyIds = Array.isArray(req.body.companyIds) ? req.body.companyIds : (Array.isArray(req.body.company_ids) ? req.body.company_ids : [req.body.companyId || req.body.company_id].filter(Boolean));
+    const rawAssigneeIds = Array.isArray(req.body.assigneeIds) ? req.body.assigneeIds : (Array.isArray(req.body.assignee_ids) ? req.body.assignee_ids : [req.body.assigneeId || req.body.assignee_id].filter(Boolean));
+    const companyIds = [...new Set(rawCompanyIds.map(id => cleanText(id)).filter(Boolean))];
+    const assigneeIds = [...new Set(rawAssigneeIds.map(id => cleanText(id)).filter(Boolean))];
+    if (!companyIds.length) return res.status(400).json({ ok: false, error: 'Kamida bitta korxona tanlang' });
+    if (!assigneeIds.length) return res.status(400).json({ ok: false, error: 'Kamida bitta xodim tanlang' });
+    if (companyIds.length * assigneeIds.length > 1000) return res.status(400).json({ ok: false, error: 'Bir martada 1000 tagacha topshiriq yaratish mumkin' });
+    const base = taskFromBody(req.body, true);
+    if (!base.title) return res.status(400).json({ ok: false, error: 'Topshiriq nomi majburiy' });
+    delete base.company_id;
+    delete base.assignee_id;
+    const now = new Date().toISOString();
+    const rows = [];
+    for (const companyId of companyIds) {
+      for (const assigneeId of assigneeIds) {
+        rows.push({ ...base, company_id: companyId, assignee_id: assigneeId, completed_at: base.status === 'Bajarildi' ? now : null });
+      }
+    }
+    const { data, error } = await supabase.from('tasks').insert(rows).select('*');
+    if (error) throw error;
+    const actorId = req.body.actorId || req.body.actor_id || base.created_by || null;
+    const historyRows = (data || []).map(task => ({
+      task_id: task.id,
+      user_id: actorId,
+      action: task.is_quick ? 'Ommaviy tezkor topshiriq yaratildi' : 'Ommaviy topshiriq yaratildi',
+      old_status: null,
+      new_status: task.status,
+      note: task.description || null
+    }));
+    if (historyRows.length) {
+      const { error: historyError } = await supabase.from('task_history').insert(historyRows);
+      if (historyError) console.warn('Bulk advanced task history failed:', historyError.message);
+    }
+    (data || []).forEach(task => notifyTaskCreatedAsync(task));
+    return res.json({ ok: true, count: (data || []).length, data: (data || []).map(taskToClient) });
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+
+app.get('/api/reports/tasks.xls', async (req, res) => {
+  try {
+    const { tasks, companies, users } = await getReportRowsFromDb(req.query || {});
+    const summary = {
+      total: tasks.length,
+      done: tasks.filter(t => isTaskDoneServer(t.status)).length,
+      overdue: tasks.filter(isTaskOverdueServer).length,
+      returned: tasks.filter(t => t.status === 'Qayta ishlashga qaytarildi').length
+    };
+    const tableRows = tasks.map(t => {
+      const c = companies.get(t.company_id) || {};
+      const u = users.get(t.assignee_id) || {};
+      return `<tr><td>${htmlEscape(c.tin || '')}</td><td>${htmlEscape(c.name || '')}</td><td>${htmlEscape(t.title || '')}</td><td>${htmlEscape(t.type || '')}</td><td>${htmlEscape(t.priority || '')}</td><td>${htmlEscape(u.full_name || '')}</td><td>${htmlEscape(taskDeadlineTextServer(t))}</td><td>${htmlEscape(t.status || '')}</td><td>${t.is_active ? 'Faol' : 'To‘xtatilgan'}</td><td>${t.is_quick ? 'Ha' : 'Yo‘q'}</td><td>${isTaskOverdueServer(t) ? 'Ha' : 'Yo‘q'}</td><td>${htmlEscape(t.description || '')}</td><td>${htmlEscape(t.employee_note || '')}</td><td>${htmlEscape(t.director_note || '')}</td><td>${htmlEscape(t.created_at || '')}</td><td>${htmlEscape(t.completed_at || '')}</td></tr>`;
+    }).join('');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Arial,sans-serif}h1{font-size:20px}.summary td{font-weight:bold;background:#eef3ff}table{border-collapse:collapse;width:100%}th{background:#4850b8;color:#fff}td,th{border:1px solid #b7c2dd;padding:7px;font-size:12px}.green{background:#e8f8ef}.red{background:#fdecec}.yellow{background:#fff6df}</style></head><body><h1>Ijro nazorati — topshiriqlar hisoboti</h1><table class="summary"><tr><td>Jami</td><td>${summary.total}</td><td>Bajarilgan</td><td class="green">${summary.done}</td><td>Kechikkan</td><td class="red">${summary.overdue}</td><td>Qaytarilgan</td><td class="yellow">${summary.returned}</td></tr></table><br><table><thead><tr><th>Korxona STIR</th><th>Korxona</th><th>Topshiriq</th><th>Turi</th><th>Muhimlik</th><th>Mas’ul xodim</th><th>Muddat</th><th>Status</th><th>Faol</th><th>Tezkor</th><th>Kechikkan</th><th>Topshiriq mazmuni</th><th>Xodim izohi</th><th>Direktor izohi</th><th>Yaratilgan sana</th><th>Bajarilgan sana</th></tr></thead><tbody>${tableRows}</tbody></table></body></html>`;
+    res.setHeader('Content-Type', 'application/vnd.ms-excel; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="ijro_nazorati_topshiriqlar.xls"');
+    return res.send(html);
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+
+const reminderSentKeys = new Map();
+function cleanupReminderCache() {
+  const now = Date.now();
+  for (const [key, value] of reminderSentKeys.entries()) if (now - value > 7 * 24 * 60 * 60 * 1000) reminderSentKeys.delete(key);
+}
+function reminderLevelForTask(task) {
+  const d = taskDeadlineDateServer(task);
+  if (!d || isTaskDoneServer(task.status) || task.status === 'Bekor qilindi' || task.status === 'Bajarilmadi') return null;
+  const ms = d.getTime() - Date.now();
+  if (ms <= 0) return null;
+  if (ms <= 60 * 60 * 1000) return { key: '1h', label: '1 soatdan kam vaqt qoldi' };
+  if (ms <= 3 * 60 * 60 * 1000) return { key: '3h', label: '3 soatdan kam vaqt qoldi' };
+  if (ms <= 24 * 60 * 60 * 1000) return { key: '24h', label: '1 kundan kam vaqt qoldi' };
+  return null;
+}
+async function checkAndSendTaskReminders() {
+  if (process.env.TELEGRAM_REMINDERS_ENABLED === 'false') return { sent: 0, skipped: true };
+  ensureDb();
+  cleanupReminderCache();
+  const [tasksRes, companiesRes, usersRes, directorsRes] = await Promise.all([
+    supabase.from('tasks').select('*').eq('is_active', true),
+    supabase.from('companies').select('*'),
+    supabase.from('app_users').select('*'),
+    supabase.from('app_users').select('*').eq('role', 'director').eq('is_active', true).not('telegram_chat_id', 'is', null)
+  ]);
+  for (const r of [tasksRes, companiesRes, usersRes, directorsRes]) if (r.error) throw r.error;
+  const companies = new Map((companiesRes.data || []).map(c => [c.id, c]));
+  const users = new Map((usersRes.data || []).map(u => [u.id, u]));
+  let sent = 0;
+  for (const task of tasksRes.data || []) {
+    const level = reminderLevelForTask(task);
+    if (!level) continue;
+    const cacheKey = `${task.id}|${level.key}|${task.deadline}|${extractTaskTimeServer(task)}|${task.updated_at || ''}`;
+    if (reminderSentKeys.has(cacheKey)) continue;
+    const company = companies.get(task.company_id) || {};
+    const assignee = users.get(task.assignee_id) || {};
+    const text = [
+      `⏰ Eslatma: ${level.label}`,
+      '',
+      `Korxona: ${company.name || '-'}`,
+      `Topshiriq: ${task.title || '-'}`,
+      `Muddat: ${taskDeadlineTextServer(task) || '-'}`,
+      `Muhimlik: ${task.priority || '-'}`,
+      `Status: ${task.status || '-'}`
+    ].join('\n');
+    const targets = [];
+    if (assignee.telegram_chat_id) targets.push(assignee.telegram_chat_id);
+    for (const d of directorsRes.data || []) if (d.telegram_chat_id) targets.push(d.telegram_chat_id);
+    const uniqueTargets = [...new Set(targets.filter(Boolean))];
+    await Promise.all(uniqueTargets.map(chatId => sendTelegramMessage(chatId, text).catch(err => console.warn('Reminder telegram failed:', err.message))));
+    reminderSentKeys.set(cacheKey, Date.now());
+    sent += uniqueTargets.length;
+  }
+  return { sent };
+}
+app.post('/api/reminders/check', async (req, res) => {
+  try {
+    const result = await checkAndSendTaskReminders();
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+const reminderScanMinutes = Math.max(1, Number(process.env.REMINDER_SCAN_MINUTES || 5));
+setInterval(() => {
+  checkAndSendTaskReminders().catch(err => console.warn('Reminder scan failed:', err.message));
+}, reminderScanMinutes * 60 * 1000);
+
 
 app.listen(PORT, () => {
   console.log(`Ijro nazorati backend running on port ${PORT}`);
