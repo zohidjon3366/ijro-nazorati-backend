@@ -39,6 +39,12 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_TASK_COMMAND = (process.env.TELEGRAM_TASK_COMMAND || '#z').trim() || '#z';
 const TELEGRAM_VOICE_MODE = (process.env.TELEGRAM_VOICE_MODE || 'command').toLowerCase(); // command | all
 const TELEGRAM_DEFAULT_DEADLINE_HOURS = Math.max(1, Number(process.env.TELEGRAM_DEFAULT_DEADLINE_HOURS || 24));
+const TELEGRAM_DEFAULT_DEADLINE_MODE = (process.env.TELEGRAM_DEFAULT_DEADLINE_MODE || 'business_hours').toLowerCase();
+const TELEGRAM_WORK_START = process.env.TELEGRAM_WORK_START || '09:00';
+const TELEGRAM_WORK_END = process.env.TELEGRAM_WORK_END || '18:00';
+const TELEGRAM_WORK_HOURS_DEADLINE_HOURS = Math.max(1, Number(process.env.TELEGRAM_WORK_HOURS_DEADLINE_HOURS || 1));
+const TELEGRAM_OFF_HOURS_DEADLINE_HOURS = Math.max(1, Number(process.env.TELEGRAM_OFF_HOURS_DEADLINE_HOURS || 8));
+const TELEGRAM_TIMEZONE = process.env.TELEGRAM_TIMEZONE || 'Asia/Tashkent';
 const TELEGRAM_PENDING_MINUTES = Math.max(1, Number(process.env.TELEGRAM_PENDING_MINUTES || 5));
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_TRANSCRIPTION_MODEL = process.env.OPENAI_TRANSCRIPTION_MODEL || 'whisper-1';
@@ -193,8 +199,11 @@ function templateToClient(t) {
   };
 }
 
-function taskToClient(t) {
+function taskToClient(t, audioTaskIds = null) {
   if (!t) return null;
+  const hasAudioAttachment = audioTaskIds instanceof Set
+    ? audioTaskIds.has(t.id)
+    : (t.hasAudioAttachment ?? t.has_audio_attachment ?? false);
   return {
     id: t.id,
     companyId: t.company_id,
@@ -209,6 +218,7 @@ function taskToClient(t) {
     employeeNote: t.employee_note || '',
     directorNote: t.director_note || '',
     isQuick: !!t.is_quick,
+    hasAudioAttachment: !!hasAudioAttachment,
     isActive: !!t.is_active,
     createdBy: t.created_by || '',
     createdAt: t.created_at,
@@ -286,18 +296,23 @@ async function makePasswordHash(password) {
 
 async function getBootstrapData() {
   ensureDb();
-  const [usersRes, companiesRes, templatesRes, tasksRes] = await Promise.all([
+  const [usersRes, companiesRes, templatesRes, tasksRes, attachmentsRes] = await Promise.all([
     supabase.from('app_users').select('*').order('created_at', { ascending: true }),
     supabase.from('companies').select('*').order('created_at', { ascending: true }),
     supabase.from('task_templates').select('*').order('created_at', { ascending: true }),
-    supabase.from('tasks').select('*').order('created_at', { ascending: false })
+    supabase.from('tasks').select('*').order('created_at', { ascending: false }),
+    supabase.from('task_attachments').select('task_id,file_name,file_type')
   ]);
   for (const r of [usersRes, companiesRes, templatesRes, tasksRes]) if (r.error) throw r.error;
+  if (attachmentsRes.error) console.warn('Audio flags load failed:', attachmentsRes.error.message);
+  const audioTaskIds = new Set((attachmentsRes.data || [])
+    .filter(a => String(a.file_type || '').toLowerCase().startsWith('audio/') || /\.(ogg|oga|mp3|m4a|wav|webm)$/i.test(String(a.file_name || '')))
+    .map(a => a.task_id));
   return {
     users: usersRes.data.map(userToClient),
     companies: companiesRes.data.map(companyToClient),
     taskTemplates: templatesRes.data.map(templateToClient),
-    tasks: tasksRes.data.map(taskToClient)
+    tasks: tasksRes.data.map(t => taskToClient(t, audioTaskIds))
   };
 }
 
@@ -370,38 +385,94 @@ function isTelegramTaskCommand(text) {
 function telegramSenderName(from = {}) {
   return cleanText([from.first_name, from.last_name].filter(Boolean).join(' ') || from.username || from.id || '');
 }
-function isoDateFromDate(d) { return d.toISOString().slice(0, 10); }
-function hhmmFromDate(d) { return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
-function parseTelegramDeadline(text) {
+function parseHm(value, fallback = '00:00') {
+  const raw = String(value || fallback).trim();
+  const m = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return parseHm(fallback, '00:00');
+  return { h: Math.min(23, Math.max(0, Number(m[1]))), m: Math.min(59, Math.max(0, Number(m[2]))) };
+}
+function hmToMinutes(value) { const p = parseHm(value); return p.h * 60 + p.m; }
+function isoFromTzParts(parts) { return `${parts.year}-${String(parts.month).padStart(2,'0')}-${String(parts.day).padStart(2,'0')}`; }
+function getTzParts(date = new Date(), timeZone = TELEGRAM_TIMEZONE) {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone, year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(date).filter(p => p.type !== 'literal').map(p => [p.type, p.value]));
+  let hour = Number(parts.hour || 0);
+  if (hour === 24) hour = 0;
+  return { year:Number(parts.year), month:Number(parts.month), day:Number(parts.day), hour, minute:Number(parts.minute || 0), second:Number(parts.second || 0) };
+}
+function dateFromTashkentLocal(dateIso, time = '00:00') {
+  const m = String(dateIso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const hm = parseHm(time || '00:00');
+  if (!m) return null;
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), hm.h - 5, hm.m, 0));
+}
+function isoDateFromTzDate(date = new Date(), timeZone = TELEGRAM_TIMEZONE) { return isoFromTzParts(getTzParts(date, timeZone)); }
+function hhmmFromTzDate(date = new Date(), timeZone = TELEGRAM_TIMEZONE) {
+  const p = getTzParts(date, timeZone);
+  return String(p.hour).padStart(2,'0') + ':' + String(p.minute).padStart(2,'0');
+}
+function addDaysToIso(dateIso, days) {
+  const base = dateFromTashkentLocal(dateIso, '12:00') || new Date();
+  base.setUTCDate(base.getUTCDate() + Number(days || 0));
+  return isoDateFromTzDate(base, TELEGRAM_TIMEZONE);
+}
+function explicitDeadlineFromText(text, baseDate = new Date()) {
   const src = cleanText(text);
-  const now = new Date();
+  const today = isoDateFromTzDate(baseDate, TELEGRAM_TIMEZONE);
   let date = '';
   let time = '';
-  let m = src.match(/(?:muddat|муддат|deadline)\s*[:\-]?\s*(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})(?:\s+(\d{1,2}:\d{2}))?/i) || src.match(/(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})(?:\s+(\d{1,2}:\d{2}))?/);
-  if (m) { date = `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`; if (m[4]) time = m[4]; }
+  let explicit = false;
+  let m = src.match(/(?:muddat|муддат|deadline)\s*[:\-]?\s*(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})(?:\s+(\d{1,2}:\d{2}))?/i) || src.match(/\b(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})(?:\s+(\d{1,2}:\d{2}))?/);
+  if (m) { date = `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`; if (m[4]) time = m[4]; explicit = true; }
   if (!date) {
-    m = src.match(/(?:muddat|муддат|deadline)\s*[:\-]?\s*(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})(?:\s+(\d{1,2}:\d{2}))?/i) || src.match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})(?:\s+(\d{1,2}:\d{2}))?/);
-    if (m) { date = `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`; if (m[4]) time = m[4]; }
+    m = src.match(/(?:muddat|муддат|deadline)\s*[:\-]?\s*(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})(?:\s+(\d{1,2}:\d{2}))?/i) || src.match(/\b(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})(?:\s+(\d{1,2}:\d{2}))?/);
+    if (m) { date = `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`; if (m[4]) time = m[4]; explicit = true; }
   }
   const timeMatch = src.match(/(?:soat|соат|time|vaqt)\s*[:\-]?\s*(\d{1,2}:\d{2})/i) || src.match(/\b(\d{1,2}:\d{2})\b/);
-  if (!time && timeMatch) time = timeMatch[1];
-  if (!date) {
-    if (/\b(ertaga|эртага|tomorrow)\b/i.test(src)) { const d = new Date(now); d.setDate(d.getDate()+1); date = isoDateFromDate(d); }
-    else if (/\b(bugun|бугун|today)\b/i.test(src)) { date = isoDateFromDate(now); }
+  if (!time && timeMatch) { time = timeMatch[1]; explicit = true; }
+  if (/\b(ertaga|эртага|tomorrow)\b/i.test(src)) { date = addDaysToIso(today, 1); explicit = true; }
+  else if (/\b(bugun|бугун|today)\b/i.test(src)) { date = today; explicit = true; }
+  if (explicit && !date && time) {
+    let d = today;
+    const dt = dateFromTashkentLocal(d, time);
+    if (dt && dt.getTime() < baseDate.getTime()) d = addDaysToIso(d, 1);
+    date = d;
   }
-  if (!date && time) {
-    const d = new Date(now);
-    const [h, mi] = time.split(':').map(Number);
-    d.setHours(h, mi, 0, 0);
-    if (d.getTime() < now.getTime()) d.setDate(d.getDate()+1);
-    date = isoDateFromDate(d);
+  return explicit ? { date, time } : null;
+}
+function automaticTelegramDeadline(baseDate = new Date()) {
+  if (TELEGRAM_DEFAULT_DEADLINE_MODE !== 'business_hours') {
+    const d = new Date(baseDate.getTime() + TELEGRAM_DEFAULT_DEADLINE_HOURS * 60 * 60 * 1000);
+    return { date: isoDateFromTzDate(d, TELEGRAM_TIMEZONE), time: hhmmFromTzDate(d, TELEGRAM_TIMEZONE), explicit: false };
   }
-  if (!date) {
-    const d = new Date(now.getTime() + TELEGRAM_DEFAULT_DEADLINE_HOURS * 60 * 60 * 1000);
-    date = isoDateFromDate(d);
-    if (!time) time = hhmmFromDate(d);
+  const parts = getTzParts(baseDate, TELEGRAM_TIMEZONE);
+  const nowMinutes = parts.hour * 60 + parts.minute;
+  const startMinutes = hmToMinutes(TELEGRAM_WORK_START || '09:00');
+  const endMinutes = hmToMinutes(TELEGRAM_WORK_END || '18:00');
+  const currentIso = isoFromTzParts(parts);
+  const inWork = nowMinutes >= startMinutes && nowMinutes < endMinutes;
+  if (inWork) {
+    const d = new Date(baseDate.getTime() + TELEGRAM_WORK_HOURS_DEADLINE_HOURS * 60 * 60 * 1000);
+    return { date: isoDateFromTzDate(d, TELEGRAM_TIMEZONE), time: hhmmFromTzDate(d, TELEGRAM_TIMEZONE), explicit: false };
   }
-  return { date, time };
+  const d = new Date(baseDate.getTime() + TELEGRAM_OFF_HOURS_DEADLINE_HOURS * 60 * 60 * 1000);
+  const res = getTzParts(d, TELEGRAM_TIMEZONE);
+  const resMinutes = res.hour * 60 + res.minute;
+  if (nowMinutes >= endMinutes && resMinutes < startMinutes) {
+    return { date: addDaysToIso(currentIso, 1), time: '10:00', explicit: false };
+  }
+  if (nowMinutes < startMinutes && resMinutes < startMinutes) {
+    return { date: currentIso, time: '10:00', explicit: false };
+  }
+  return { date: isoFromTzParts(res), time: String(res.hour).padStart(2,'0') + ':' + String(res.minute).padStart(2,'0'), explicit: false };
+}
+function parseTelegramDeadline(text, baseDate = new Date()) {
+  const explicit = explicitDeadlineFromText(text, baseDate);
+  if (explicit) return explicit;
+  return automaticTelegramDeadline(baseDate);
 }
 function telegramTitleFromText(text) {
   const cleaned = cleanText(text).split(/\n+/).map(cleanText).filter(Boolean)
@@ -695,7 +766,7 @@ function isTaskDoneServer(status) {
 }
 
 function todayIsoServer() {
-  return new Date().toISOString().slice(0, 10);
+  return isoDateFromTzDate(new Date(), process.env.REMINDER_TIMEZONE || TELEGRAM_TIMEZONE || 'Asia/Tashkent');
 }
 
 function isTaskOverdueServer(task) {
@@ -1244,8 +1315,8 @@ function extractTaskTimeServer(task) {
 function taskDeadlineDateServer(task) {
   if (!task?.deadline) return null;
   const time = extractTaskTimeServer(task) || '23:59';
-  const d = new Date(String(task.deadline).slice(0, 10) + 'T' + time + ':00');
-  return Number.isNaN(d.getTime()) ? null : d;
+  const d = dateFromTashkentLocal(String(task.deadline).slice(0, 10), time);
+  return !d || Number.isNaN(d.getTime()) ? null : d;
 }
 function taskDeadlineTextServer(task) {
   const time = extractTaskTimeServer(task);
@@ -1340,9 +1411,19 @@ app.get('/api/reports/tasks.xls', async (req, res) => {
 });
 
 const reminderSentKeys = new Map();
+const REMINDER_MODE = (process.env.REMINDER_MODE || 'scheduled').toLowerCase();
+const REMINDER_TIMEZONE = process.env.REMINDER_TIMEZONE || 'Asia/Tashkent';
+const REMINDER_SCHEDULE_WINDOW_MINUTES = Math.max(1, Number(process.env.REMINDER_SCHEDULE_WINDOW_MINUTES || 3));
+const REMINDER_DIGEST_ENABLED = process.env.REMINDER_DIGEST_ENABLED !== 'false';
+const REMINDER_OVERDUE_EVERY_TIME = process.env.REMINDER_OVERDUE_EVERY_TIME !== 'false';
+const WEEKLY_DIGEST_ENABLED = process.env.WEEKLY_DIGEST_ENABLED === 'true';
+const WEEKLY_DIGEST_DAY = (process.env.WEEKLY_DIGEST_DAY || 'FRIDAY').toUpperCase();
+const WEEKLY_DIGEST_TIME = process.env.WEEKLY_DIGEST_TIME || '17:30';
+const WEEKLY_DIGEST_TIMEZONE = process.env.WEEKLY_DIGEST_TIMEZONE || REMINDER_TIMEZONE;
+
 function cleanupReminderCache() {
   const now = Date.now();
-  for (const [key, value] of reminderSentKeys.entries()) if (now - value > 7 * 24 * 60 * 60 * 1000) reminderSentKeys.delete(key);
+  for (const [key, value] of reminderSentKeys.entries()) if (now - value > 14 * 24 * 60 * 60 * 1000) reminderSentKeys.delete(key);
 }
 function reminderThresholdLabel(minutes) {
   const m = Number(minutes || 0);
@@ -1356,6 +1437,13 @@ function reminderThresholdsConfig() {
   const unique = [...new Set(values.length ? values : [1440, 180, 60])];
   return unique.sort((a, b) => a - b).map(minutes => ({ key: `${minutes}m`, minutes, ms: minutes * 60 * 1000, label: reminderThresholdLabel(minutes) }));
 }
+function reminderTimesConfig() {
+  const raw = String(process.env.REMINDER_TIMES || '09:00,13:00,17:30');
+  return [...new Set(raw.split(',').map(x => cleanText(x)).filter(x => /^\d{1,2}:\d{2}$/.test(x)).map(x => {
+    const p = parseHm(x);
+    return String(p.h).padStart(2,'0') + ':' + String(p.m).padStart(2,'0');
+  }))];
+}
 function reminderLevelForTask(task) {
   const d = taskDeadlineDateServer(task);
   if (!d || isTaskDoneServer(task.status) || task.status === 'Bekor qilindi' || task.status === 'Bajarilmadi') return null;
@@ -1363,7 +1451,109 @@ function reminderLevelForTask(task) {
   if (ms <= 0) return null;
   return reminderThresholdsConfig().find(level => ms <= level.ms) || null;
 }
-async function checkAndSendTaskReminders() {
+function sameIso(dateIso, task) { return String(task?.deadline || '').slice(0,10) === String(dateIso || '').slice(0,10); }
+function taskNotFinalServer(task) { return !isTaskDoneServer(task.status) && task.status !== 'Bekor qilindi' && task.status !== 'Bajarilmadi'; }
+function dueWithinServer(task, hours) {
+  const d = taskDeadlineDateServer(task);
+  if (!d || !taskNotFinalServer(task)) return false;
+  const ms = d.getTime() - Date.now();
+  return ms >= 0 && ms <= Number(hours || 1) * 60 * 60 * 1000;
+}
+function topTaskLines(tasks, companies, limit = 5) {
+  const rows = (tasks || []).slice(0, limit);
+  if (!rows.length) return 'Topshiriq yo‘q';
+  return rows.map((t, i) => `${i + 1}. ${(companies.get(t.company_id) || {}).name || '-'} — ${t.title || '-'}`).join('\n');
+}
+function weeklyDayNumber(name) {
+  return { SUNDAY:0, MONDAY:1, TUESDAY:2, WEDNESDAY:3, THURSDAY:4, FRIDAY:5, SATURDAY:6 }[String(name || '').toUpperCase()] ?? 5;
+}
+function scheduledTimeInWindow(targetHm, now = new Date(), timeZone = REMINDER_TIMEZONE, windowMinutes = REMINDER_SCHEDULE_WINDOW_MINUTES) {
+  const p = getTzParts(now, timeZone);
+  const nowMin = p.hour * 60 + p.minute;
+  const targetMin = hmToMinutes(targetHm);
+  const diff = Math.abs(nowMin - targetMin);
+  return diff <= windowMinutes ? { ok: true, dateIso: isoFromTzParts(p), hm: String(parseHm(targetHm).h).padStart(2,'0') + ':' + String(parseHm(targetHm).m).padStart(2,'0'), parts: p } : { ok: false, dateIso: isoFromTzParts(p), hm: targetHm, parts: p };
+}
+function digestTextForTime(scheduleTime, tasks, companies) {
+  const today = todayIsoServer();
+  const active = (tasks || []).filter(t => t.is_active !== false);
+  const todayTasks = active.filter(t => sameIso(today, t));
+  const overdue = active.filter(isTaskOverdueServer);
+  const urgent = active.filter(t => dueWithinServer(t, 1));
+  const notDoneToday = todayTasks.filter(taskNotFinalServer);
+  const notStartedToday = todayTasks.filter(t => t.status === 'Yangi' || t.status === 'Qabul qilindi');
+  const doneToday = todayTasks.filter(t => isTaskDoneServer(t.status));
+  const review = active.filter(t => t.status === 'Bajarildi');
+  const important = todayTasks.filter(taskNotFinalServer).sort((a,b)=>(isTaskOverdueServer(b)-isTaskOverdueServer(a)) || String(taskDeadlineTextServer(a)).localeCompare(String(taskDeadlineTextServer(b))));
+  if (scheduleTime === '09:00') {
+    return [`📌 Bugungi ijro rejasi`, '', `Bugun muddati tugaydigan topshiriqlar: ${todayTasks.length} ta`, `Shoshilinch: ${urgent.length} ta`, `Kechikkan: ${overdue.length} ta`, '', `Eng muhim topshiriqlar:`, topTaskLines(important, companies, 5)].join('\n');
+  }
+  if (scheduleTime === '13:00') {
+    return [`⏳ Kunduzgi ijro nazorati`, '', `Bugungi topshiriqlardan bajarilmaganlari: ${notDoneToday.length} ta`, `Hali boshlanmagan: ${notStartedToday.length} ta`, `1 soatdan kam qolgan: ${urgent.length} ta`, '', topTaskLines(notDoneToday, companies, 5)].join('\n');
+  }
+  if (scheduleTime === '17:30') {
+    return [`📊 Kun yakuni`, '', `Bugun bajarilgan: ${doneToday.length} ta`, `Bajarilmagan: ${notDoneToday.length} ta`, `Kechikkan: ${overdue.length} ta`, `Tasdiqlash kutayotgan topshiriqlar: ${review.length} ta`, '', topTaskLines(notDoneToday.concat(review), companies, 5)].join('\n');
+  }
+  if (scheduleTime === '20:00') {
+    return [`🚨 Kechikkan topshiriqlar`, '', `Jami kechikkan: ${overdue.length} ta`, '', topTaskLines(overdue, companies, 8)].join('\n');
+  }
+  return [`📌 Ijro nazorati digest`, '', `Bugungi topshiriqlar: ${todayTasks.length} ta`, `Bajarilmagan: ${notDoneToday.length} ta`, `Kechikkan: ${overdue.length} ta`, `Tasdiqlash kutayotgan: ${review.length} ta`, '', topTaskLines(notDoneToday.concat(overdue), companies, 5)].join('\n');
+}
+async function sendToActiveDirectors(text) {
+  const directorsRes = await supabase.from('app_users').select('*').eq('role', 'director').eq('is_active', true).not('telegram_chat_id', 'is', null);
+  if (directorsRes.error) throw directorsRes.error;
+  const targets = [...new Set((directorsRes.data || []).map(d => d.telegram_chat_id).filter(Boolean))];
+  await Promise.all(targets.map(chatId => sendTelegramMessage(chatId, text).catch(err => console.warn('Digest telegram failed:', err.message))));
+  return targets.length;
+}
+async function checkAndSendScheduledDigest() {
+  if (process.env.TELEGRAM_REMINDERS_ENABLED === 'false') return { sent: 0, skipped: true };
+  if (!REMINDER_DIGEST_ENABLED) return { sent: 0, skipped: true, reason: 'digest_disabled' };
+  ensureDb();
+  cleanupReminderCache();
+  const times = reminderTimesConfig();
+  const matched = times.map(t => scheduledTimeInWindow(t, new Date(), REMINDER_TIMEZONE)).find(x => x.ok);
+  if (!matched) return { sent: 0, mode: 'scheduled', checked: true };
+  const cacheKey = `digest|${matched.dateIso}|${matched.hm}`;
+  if (reminderSentKeys.has(cacheKey)) return { sent: 0, mode: 'scheduled', duplicate: true };
+  const [tasksRes, companiesRes] = await Promise.all([
+    supabase.from('tasks').select('*').eq('is_active', true),
+    supabase.from('companies').select('*')
+  ]);
+  for (const r of [tasksRes, companiesRes]) if (r.error) throw r.error;
+  const companies = new Map((companiesRes.data || []).map(c => [c.id, c]));
+  const text = digestTextForTime(matched.hm, tasksRes.data || [], companies);
+  const sent = await sendToActiveDirectors(text);
+  reminderSentKeys.set(cacheKey, Date.now());
+  if (WEEKLY_DIGEST_ENABLED) await checkAndSendWeeklyDigest(tasksRes.data || [], companies).catch(err => console.warn('Weekly digest failed:', err.message));
+  return { sent, mode: 'scheduled', scheduleTime: matched.hm };
+}
+async function checkAndSendWeeklyDigest(preloadedTasks = null, preloadedCompanies = null) {
+  if (!WEEKLY_DIGEST_ENABLED) return { sent: 0, skipped: true };
+  const matched = scheduledTimeInWindow(WEEKLY_DIGEST_TIME, new Date(), WEEKLY_DIGEST_TIMEZONE, REMINDER_SCHEDULE_WINDOW_MINUTES);
+  if (!matched.ok) return { sent: 0, checked: true };
+  const localNoon = dateFromTashkentLocal(matched.dateIso, '12:00') || new Date();
+  if (localNoon.getUTCDay() !== weeklyDayNumber(WEEKLY_DIGEST_DAY)) return { sent: 0, checked: true };
+  const cacheKey = `weekly|${matched.dateIso}|${WEEKLY_DIGEST_DAY}|${WEEKLY_DIGEST_TIME}`;
+  if (reminderSentKeys.has(cacheKey)) return { sent: 0, duplicate: true };
+  ensureDb();
+  let tasks = preloadedTasks;
+  let companies = preloadedCompanies;
+  if (!tasks || !companies) {
+    const [tasksRes, companiesRes] = await Promise.all([supabase.from('tasks').select('*').eq('is_active', true), supabase.from('companies').select('*')]);
+    for (const r of [tasksRes, companiesRes]) if (r.error) throw r.error;
+    tasks = tasksRes.data || [];
+    companies = new Map((companiesRes.data || []).map(c => [c.id, c]));
+  }
+  const done = tasks.filter(t => isTaskDoneServer(t.status)).length;
+  const overdue = tasks.filter(isTaskOverdueServer).length;
+  const returned = tasks.filter(t => t.status === 'Qayta ishlashga qaytarildi').length;
+  const text = [`📊 Haftalik ijro hisoboti`, '', `Jami topshiriqlar: ${tasks.length} ta`, `Bajarilgan: ${done} ta`, `Kechikkan: ${overdue} ta`, `Qaytarilgan: ${returned} ta`, '', `Eng muhim topshiriqlar:`, topTaskLines(tasks.filter(taskNotFinalServer).sort((a,b)=>String(taskDeadlineTextServer(a)).localeCompare(String(taskDeadlineTextServer(b)))), companies, 5)].join('\n');
+  const sent = await sendToActiveDirectors(text);
+  reminderSentKeys.set(cacheKey, Date.now());
+  return { sent, mode: 'weekly' };
+}
+async function checkAndSendThresholdReminders() {
   if (process.env.TELEGRAM_REMINDERS_ENABLED === 'false') return { sent: 0, skipped: true };
   ensureDb();
   cleanupReminderCache();
@@ -1384,15 +1574,7 @@ async function checkAndSendTaskReminders() {
     if (reminderSentKeys.has(cacheKey)) continue;
     const company = companies.get(task.company_id) || {};
     const assignee = users.get(task.assignee_id) || {};
-    const text = [
-      `⏰ Eslatma: ${level.label}`,
-      '',
-      `Korxona: ${company.name || '-'}`,
-      `Topshiriq: ${task.title || '-'}`,
-      `Muddat: ${taskDeadlineTextServer(task) || '-'}`,
-      `Muhimlik: ${task.priority || '-'}`,
-      `Status: ${task.status || '-'}`
-    ].join('\n');
+    const text = [`⏰ Eslatma: ${level.label}`, '', `Korxona: ${company.name || '-'}`, `Topshiriq: ${task.title || '-'}`, `Muddat: ${taskDeadlineTextServer(task) || '-'}`, `Muhimlik: ${task.priority || '-'}`, `Status: ${task.status || '-'}`].join('\n');
     const targets = [];
     if (assignee.telegram_chat_id) targets.push(assignee.telegram_chat_id);
     for (const d of directorsRes.data || []) if (d.telegram_chat_id) targets.push(d.telegram_chat_id);
@@ -1401,10 +1583,14 @@ async function checkAndSendTaskReminders() {
     reminderSentKeys.set(cacheKey, Date.now());
     sent += uniqueTargets.length;
   }
-  return { sent };
+  return { sent, mode: 'threshold' };
+}
+async function checkAndSendTaskReminders() {
+  if (REMINDER_MODE === 'scheduled') return checkAndSendScheduledDigest();
+  return checkAndSendThresholdReminders();
 }
 app.get('/api/reminders/config', (req, res) => {
-  return res.json({ ok: true, scanMinutes: reminderScanMinutes, thresholdsMinutes: reminderThresholdsConfig().map(x => x.minutes), envExample: { REMINDER_SCAN_MINUTES: String(reminderScanMinutes), REMINDER_THRESHOLDS_MINUTES: reminderThresholdsConfig().map(x => x.minutes).join(',') } });
+  return res.json({ ok: true, mode: REMINDER_MODE, scanMinutes: reminderScanMinutes, thresholdsMinutes: reminderThresholdsConfig().map(x => x.minutes), times: reminderTimesConfig(), timezone: REMINDER_TIMEZONE, scheduleWindowMinutes: REMINDER_SCHEDULE_WINDOW_MINUTES, digestEnabled: REMINDER_DIGEST_ENABLED, overdueEveryTime: REMINDER_OVERDUE_EVERY_TIME, weeklyDigest: { enabled: WEEKLY_DIGEST_ENABLED, day: WEEKLY_DIGEST_DAY, time: WEEKLY_DIGEST_TIME, timezone: WEEKLY_DIGEST_TIMEZONE }, envExample: { REMINDER_MODE, REMINDER_SCAN_MINUTES: String(reminderScanMinutes), REMINDER_THRESHOLDS_MINUTES: reminderThresholdsConfig().map(x => x.minutes).join(','), REMINDER_TIMES: reminderTimesConfig().join(','), REMINDER_TIMEZONE, REMINDER_SCHEDULE_WINDOW_MINUTES: String(REMINDER_SCHEDULE_WINDOW_MINUTES), REMINDER_DIGEST_ENABLED: String(REMINDER_DIGEST_ENABLED), REMINDER_OVERDUE_EVERY_TIME: String(REMINDER_OVERDUE_EVERY_TIME) } });
 });
 
 app.post('/api/reminders/check', async (req, res) => {
