@@ -1038,6 +1038,7 @@ app.put('/api/tasks/:id', async (req, res) => {
     if (payload.status && payload.status !== oldTask.status) {
       await addTaskHistory(data.id, actorId, 'Status o‘zgardi', oldTask.status, data.status, data.employee_note || data.director_note || '');
       await notifyDirectorsTaskStatusChanged(data, oldTask.status);
+      if (data.status === 'Direktor tasdiqladi' && oldTask.status !== 'Direktor tasdiqladi') notifyCustomerTaskDone(data).catch(err => console.warn('Customer done notify async failed:', err.message));
     } else {
       await addTaskHistory(data.id, actorId, 'Topshiriq tahrirlandi', oldTask.status, data.status, data.employee_note || data.director_note || '');
     }
@@ -1060,6 +1061,7 @@ app.post('/api/tasks/:id/confirm', async (req, res) => {
     }).eq('id', req.params.id).select('*').single();
     if (error) throw error;
     await addTaskHistory(data.id, req.body.actorId || null, 'Direktor tasdiqladi', oldTask.status, data.status, note);
+    if (oldTask.status !== 'Direktor tasdiqladi') notifyCustomerTaskDone(data).catch(err => console.warn('Customer done notify async failed:', err.message));
     return res.json({ ok: true, data: taskToClient(data) });
   } catch (err) {
     return handleError(res, err);
@@ -1405,6 +1407,100 @@ setInterval(() => {
   checkAndSendTaskReminders().catch(err => console.warn('Reminder scan failed:', err.message));
 }, reminderScanMinutes * 60 * 1000);
 
+
+
+// ================= Stage 8.0 — customer completion notice and printable PDF reports =================
+// Baza strukturasini o'zgartirmaydi. Telegram guruhga yakuniy xabar group_id -> company_id env xaritasi orqali yuboriladi.
+function telegramGroupIdForCompany(companyId) {
+  const map = telegramCompanyMap();
+  for (const [chatId, mappedCompanyId] of Object.entries(map || {})) {
+    if (String(mappedCompanyId) === String(companyId)) return String(chatId);
+  }
+  return '';
+}
+function taskDoneCustomerText(task, company = {}, assignee = {}) {
+  return [
+    '✅ Topshiriq bajarildi va tasdiqlandi',
+    '',
+    `Korxona: ${company.name || '-'}`,
+    `Topshiriq: ${task.title || '-'}`,
+    `Mas’ul: ${assignee.full_name || '-'}`,
+    `Muddat: ${taskDeadlineTextServer(task) || '-'}`,
+    `Tasdiq vaqti: ${new Date().toLocaleString('uz-UZ')}`,
+    '',
+    'Rahmat. Topshiriq ijrosi tizimda yakunlandi.'
+  ].join('\n');
+}
+async function notifyCustomerTaskDone(task) {
+  try {
+    if (process.env.CUSTOMER_DONE_NOTIFY_ENABLED === 'false') return { ok: false, skipped: true };
+    if (!task || task.status !== 'Direktor tasdiqladi') return { ok: false, skipped: true };
+    const groupId = telegramGroupIdForCompany(task.company_id);
+    if (!groupId) return { ok: false, skipped: true, reason: 'group_not_mapped' };
+    const [company, assignee] = await Promise.all([
+      getById('companies', task.company_id).catch(() => null),
+      getById('app_users', task.assignee_id).catch(() => null)
+    ]);
+    const result = await sendTelegramMessage(groupId, taskDoneCustomerText(task, company || {}, assignee || {}));
+    await addTaskHistory(task.id, null, 'Mijoz Telegram guruhiga bajarildi xabari yuborildi', task.status, task.status, `Guruh ID: ${groupId}`);
+    return result;
+  } catch (err) {
+    console.warn('Customer done telegram failed:', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+function reportPrintableHtml(tasks, companies, users, title = 'Ijro nazorati hisoboti') {
+  const summary = {
+    total: tasks.length,
+    done: tasks.filter(t => isTaskDoneServer(t.status)).length,
+    overdue: tasks.filter(isTaskOverdueServer).length,
+    returned: tasks.filter(t => t.status === 'Qayta ishlashga qaytarildi').length,
+    inProgress: tasks.filter(t => ['Yangi','Qabul qilindi','Bajarilmoqda'].includes(t.status)).length
+  };
+  const companyStats = new Map();
+  const employeeStats = new Map();
+  for (const t of tasks) {
+    const c = companies.get(t.company_id) || {};
+    const u = users.get(t.assignee_id) || {};
+    const ck = c.name || '-';
+    const uk = u.full_name || '-';
+    if (!companyStats.has(ck)) companyStats.set(ck, { name: ck, total: 0, done: 0, overdue: 0 });
+    if (!employeeStats.has(uk)) employeeStats.set(uk, { name: uk, total: 0, done: 0, overdue: 0, returned: 0 });
+    const cs = companyStats.get(ck); cs.total++; if (isTaskDoneServer(t.status)) cs.done++; if (isTaskOverdueServer(t)) cs.overdue++;
+    const es = employeeStats.get(uk); es.total++; if (isTaskDoneServer(t.status)) es.done++; if (isTaskOverdueServer(t)) es.overdue++; if (t.status === 'Qayta ishlashga qaytarildi') es.returned++;
+  }
+  const statCards = `<div class="cards"><div><span>Jami</span><b>${summary.total}</b></div><div><span>Bajarilgan</span><b>${summary.done}</b></div><div><span>Jarayonda</span><b>${summary.inProgress}</b></div><div><span>Kechikkan</span><b>${summary.overdue}</b></div><div><span>Qaytarilgan</span><b>${summary.returned}</b></div></div>`;
+  const companyRows = [...companyStats.values()].sort((a,b)=>b.total-a.total).slice(0,15).map(x=>`<tr><td>${htmlEscape(x.name)}</td><td>${x.total}</td><td>${x.done}</td><td>${x.overdue}</td></tr>`).join('');
+  const employeeRows = [...employeeStats.values()].sort((a,b)=>b.done-a.done || a.overdue-b.overdue).slice(0,15).map(x=>`<tr><td>${htmlEscape(x.name)}</td><td>${x.total}</td><td>${x.done}</td><td>${x.overdue}</td><td>${x.returned}</td></tr>`).join('');
+  const taskRows = tasks.map(t => {
+    const c = companies.get(t.company_id) || {};
+    const u = users.get(t.assignee_id) || {};
+    return `<tr><td>${htmlEscape(c.tin || '')}</td><td>${htmlEscape(c.name || '')}</td><td>${htmlEscape(t.title || '')}</td><td>${htmlEscape(t.priority || '')}</td><td>${htmlEscape(u.full_name || '')}</td><td>${htmlEscape(taskDeadlineTextServer(t))}</td><td>${htmlEscape(t.status || '')}</td><td>${isTaskOverdueServer(t) ? 'Ha' : 'Yo‘q'}</td><td>${htmlEscape((t.description || '').slice(0,500))}</td></tr>`;
+  }).join('');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${htmlEscape(title)}</title><style>
+    @page{size:A4 landscape;margin:12mm}body{font-family:Arial, sans-serif;color:#172033;margin:0}h1{font-size:22px;margin:0 0 6px}h2{font-size:16px;margin:22px 0 8px}.muted{color:#5f6b85;font-size:12px}.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:14px 0}.cards div{border:1px solid #cbd5e1;background:#f4f7fb;border-radius:10px;padding:10px}.cards span{display:block;font-size:11px;color:#64748b}.cards b{font-size:22px}table{border-collapse:collapse;width:100%;margin-bottom:14px}th{background:#4850b8;color:#fff}td,th{border:1px solid #b8c2d6;padding:6px 7px;font-size:11px;text-align:left;vertical-align:top}.printbar{display:flex;justify-content:flex-end;margin-bottom:12px}.printbtn{background:#4850b8;color:#fff;border:0;border-radius:10px;padding:10px 14px;font-weight:bold;cursor:pointer}@media print{.printbar{display:none}body{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
+  </style></head><body><div class="printbar"><button class="printbtn" onclick="window.print()">PDF saqlash / Chop etish</button></div><h1>${htmlEscape(title)}</h1><div class="muted">Shakllangan vaqt: ${new Date().toLocaleString('uz-UZ')}</div>${statCards}<h2>Korxonalar reytingi</h2><table><thead><tr><th>Korxona</th><th>Jami</th><th>Bajarilgan</th><th>Kechikkan</th></tr></thead><tbody>${companyRows || '<tr><td colspan="4">Ma’lumot yo‘q</td></tr>'}</tbody></table><h2>Xodimlar reytingi</h2><table><thead><tr><th>Xodim</th><th>Jami</th><th>Bajarilgan</th><th>Kechikkan</th><th>Qaytarilgan</th></tr></thead><tbody>${employeeRows || '<tr><td colspan="5">Ma’lumot yo‘q</td></tr>'}</tbody></table><h2>Topshiriqlar ro‘yxati</h2><table><thead><tr><th>STIR</th><th>Korxona</th><th>Topshiriq</th><th>Muhimlik</th><th>Mas’ul</th><th>Muddat</th><th>Status</th><th>Kechikkan</th><th>Izoh</th></tr></thead><tbody>${taskRows || '<tr><td colspan="9">Topshiriq topilmadi</td></tr>'}</tbody></table></body></html>`;
+}
+app.get('/api/reports/tasks.print', async (req, res) => {
+  try {
+    const { tasks, companies, users } = await getReportRowsFromDb(req.query || {});
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.send(reportPrintableHtml(tasks, companies, users, 'Ijro nazorati — PDF/Print hisobot'));
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+app.get('/api/reports/tasks.pdf', async (req, res) => {
+  try {
+    const { tasks, companies, users } = await getReportRowsFromDb(req.query || {});
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.send(reportPrintableHtml(tasks, companies, users, 'Ijro nazorati — PDF hisobot'));
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Ijro nazorati backend running on port ${PORT}`);
