@@ -38,3 +38,10 @@ public/ijro-nazorati.html
 ```
 
 So‘ng Render’da Manual Deploy qiling.
+
+
+## Stage 8.1 Stable rebuild
+- Frontend syntax xatolari tozalandi.
+- Topshiriqlar, tezkor topshiriqlar va doskada yangi yaratilgan topshiriqlar yuqorida chiqadi.
+- Telegram reminder intervallari ENV orqali sozlanadi: `REMINDER_SCAN_MINUTES` va `REMINDER_THRESHOLDS_MINUTES`.
+- Supabase jadval/ustun/migration o'zgarmaydi.
