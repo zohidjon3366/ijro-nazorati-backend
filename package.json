@@ -1,6 +1,6 @@
 {
-  "name": "tilda-ijro-nazorati-backend-stage7-5-iframe",
-  "version": "8.0.0",
+  "name": "tilda-ijro-nazorati-backend-stage8-2",
+  "version": "8.2.0",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -15,5 +15,5 @@
     "express": "^4.19.2",
     "multer": "^1.4.5-lts.1"
   },
-  "description": "Ijro Nazorati Stage 8.0: leadership control center, Telegram customer completion notice, quick actions, printable PDF/Excel reports, voice playback, no DB schema changes"
+  "description": "Ijro Nazorati Stage 8.2: Telegram UX, business-hours deadlines, scheduled reminder digests, flexible companies pagination, no DB schema changes"
 }
