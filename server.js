@@ -1344,15 +1344,24 @@ function cleanupReminderCache() {
   const now = Date.now();
   for (const [key, value] of reminderSentKeys.entries()) if (now - value > 7 * 24 * 60 * 60 * 1000) reminderSentKeys.delete(key);
 }
+function reminderThresholdLabel(minutes) {
+  const m = Number(minutes || 0);
+  if (m % 1440 === 0) return `${m / 1440} kun qoldi`;
+  if (m % 60 === 0) return `${m / 60} soat qoldi`;
+  return `${m} minut qoldi`;
+}
+function reminderThresholdsConfig() {
+  const raw = String(process.env.REMINDER_THRESHOLDS_MINUTES || '1440,180,60');
+  const values = raw.split(',').map(x => Number(String(x).trim())).filter(x => Number.isFinite(x) && x > 0);
+  const unique = [...new Set(values.length ? values : [1440, 180, 60])];
+  return unique.sort((a, b) => a - b).map(minutes => ({ key: `${minutes}m`, minutes, ms: minutes * 60 * 1000, label: reminderThresholdLabel(minutes) }));
+}
 function reminderLevelForTask(task) {
   const d = taskDeadlineDateServer(task);
   if (!d || isTaskDoneServer(task.status) || task.status === 'Bekor qilindi' || task.status === 'Bajarilmadi') return null;
   const ms = d.getTime() - Date.now();
   if (ms <= 0) return null;
-  if (ms <= 60 * 60 * 1000) return { key: '1h', label: '1 soatdan kam vaqt qoldi' };
-  if (ms <= 3 * 60 * 60 * 1000) return { key: '3h', label: '3 soatdan kam vaqt qoldi' };
-  if (ms <= 24 * 60 * 60 * 1000) return { key: '24h', label: '1 kundan kam vaqt qoldi' };
-  return null;
+  return reminderThresholdsConfig().find(level => ms <= level.ms) || null;
 }
 async function checkAndSendTaskReminders() {
   if (process.env.TELEGRAM_REMINDERS_ENABLED === 'false') return { sent: 0, skipped: true };
@@ -1394,6 +1403,10 @@ async function checkAndSendTaskReminders() {
   }
   return { sent };
 }
+app.get('/api/reminders/config', (req, res) => {
+  return res.json({ ok: true, scanMinutes: reminderScanMinutes, thresholdsMinutes: reminderThresholdsConfig().map(x => x.minutes), envExample: { REMINDER_SCAN_MINUTES: String(reminderScanMinutes), REMINDER_THRESHOLDS_MINUTES: reminderThresholdsConfig().map(x => x.minutes).join(',') } });
+});
+
 app.post('/api/reminders/check', async (req, res) => {
   try {
     const result = await checkAndSendTaskReminders();
