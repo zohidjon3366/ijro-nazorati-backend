@@ -1192,6 +1192,7 @@ app.put('/api/tasks/:id', async (req, res) => {
     const oldTask = await getById('tasks', req.params.id);
     if (!oldTask) return res.status(404).json({ ok: false, error: 'Topshiriq topilmadi' });
     const payload = taskFromBody(req.body, false);
+    preserveControlMarkerForPayload(payload, oldTask);
     if (payload.status === 'Bajarildi' && !oldTask.completed_at) payload.completed_at = new Date().toISOString();
     if (payload.status && payload.status !== 'Bajarildi') payload.completed_at = null;
     const { data, error } = await supabase.from('tasks').update(payload).eq('id', req.params.id).select('*').single();
@@ -1210,13 +1211,76 @@ app.put('/api/tasks/:id', async (req, res) => {
   }
 });
 
-function preserveControlMarkerOnConfirm(oldNote, newNote) {
-  const oldText = cleanText(oldNote || '');
-  const incoming = cleanText(newNote || '');
-  const marker = oldText.match(/\[NazoratJadvali\][\s\S]*?(?=\n\[|$)/i)?.[0] || '';
-  if (!incoming) return oldText || 'Tasdiqlandi.';
-  if (marker && !/\[NazoratJadvali\]/i.test(incoming)) return `${incoming}\n${marker}`;
-  return incoming || oldText || 'Tasdiqlandi.';
+function normalizeMultilineNote(value) {
+  return String(value || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\u00a0/g, ' ')
+    .split('\n')
+    .map(line => line.replace(/[ \t]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function extractControlMarkerParts(value) {
+  const raw = normalizeMultilineNote(value);
+  if (!/\[NazoratJadvali\]/i.test(raw)) return null;
+  const month = raw.match(/Oy:\s*([0-9]{4}-[0-9]{2})/i)?.[1] || '';
+  const bandId = raw.match(/BandID:\s*([A-Za-z0-9_.:-]+)/i)?.[1] || '';
+  let band = '';
+  const bandLine = raw.match(/Band:\s*([^\n]+)/i)?.[1] || '';
+  if (bandLine) {
+    band = bandLine
+      .replace(/\s*BandID:\s*[A-Za-z0-9_.:-].*$/i, '')
+      .replace(/\s*\[Soat:\s*\d{2}:\d{2}\].*$/i, '')
+      .trim();
+  }
+  if (!month || (!band && !bandId)) return null;
+  return { month, band, bandId };
+}
+
+function buildControlMarkerBlock(parts) {
+  if (!parts?.month) return '';
+  const lines = ['[NazoratJadvali]', `Oy: ${parts.month}`];
+  if (parts.band) lines.push(`Band: ${parts.band}`);
+  if (parts.bandId) lines.push(`BandID: ${parts.bandId}`);
+  return lines.join('\n');
+}
+
+function extractControlMarkerBlockFromTask(task) {
+  const parts = extractControlMarkerParts([task?.director_note, task?.description, task?.title].filter(Boolean).join('\n'));
+  return buildControlMarkerBlock(parts);
+}
+
+function appendControlMarkerIfMissing(note, marker) {
+  const incoming = normalizeMultilineNote(note);
+  if (!marker) return incoming;
+  if (/\[NazoratJadvali\]/i.test(incoming)) {
+    const parts = extractControlMarkerParts(incoming);
+    const rebuilt = buildControlMarkerBlock(parts);
+    return rebuilt
+      ? incoming.replace(/\[NazoratJadvali\][\s\S]*?(?=\n\[Soat:|\nManba:|\nGuruh:|\nYuboruvchi:|\nTelegram message_id:|\nMatn:|\nTranskript:|$)/i, rebuilt).trim()
+      : incoming;
+  }
+  return (incoming ? `${incoming}\n${marker}` : marker).trim();
+}
+
+function preserveControlMarkerForPayload(payload, oldTask) {
+  const marker = extractControlMarkerBlockFromTask(oldTask);
+  if (!marker) return payload;
+  if (Object.prototype.hasOwnProperty.call(payload, 'director_note')) {
+    payload.director_note = appendControlMarkerIfMissing(payload.director_note, marker);
+  } else if (Object.prototype.hasOwnProperty.call(payload, 'description') && /\[Nazorat\]/i.test(String(oldTask?.title || ''))) {
+    payload.director_note = appendControlMarkerIfMissing(oldTask?.director_note || '', marker);
+  }
+  return payload;
+}
+
+function preserveControlMarkerOnConfirm(oldTask, newNote) {
+  const marker = extractControlMarkerBlockFromTask(oldTask);
+  const incoming = normalizeMultilineNote(newNote || '');
+  return appendControlMarkerIfMissing(incoming || 'Tasdiqlandi.', marker) || 'Tasdiqlandi.';
 }
 
 app.post('/api/tasks/:id/confirm', async (req, res) => {
@@ -1224,7 +1288,7 @@ app.post('/api/tasks/:id/confirm', async (req, res) => {
     ensureDb();
     const oldTask = await getById('tasks', req.params.id);
     if (!oldTask) return res.status(404).json({ ok: false, error: 'Topshiriq topilmadi' });
-    const note = preserveControlMarkerOnConfirm(oldTask.director_note, req.body.directorNote || req.body.director_note || '');
+    const note = preserveControlMarkerOnConfirm(oldTask, req.body.directorNote || req.body.director_note || '');
     const { data, error } = await supabase.from('tasks').update({
       status: 'Direktor tasdiqladi',
       director_note: note,
