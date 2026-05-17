@@ -1,36 +1,22 @@
-# Ijro Nazorati — Stage 8.3.1 Final Fix
+# Stage 8.3.1 Final v2 — Nazorat jadvali marker fix
 
-Ushbu paket Stage 8.3.1 fix asosida tayyorlandi. Hozirgi Supabase baza o'chirilmaydi, yangi jadval/ustun/migration qo'shilmaydi.
+Ushbu patch Stage 8.3.1 Final ustiga qo‘yiladi.
 
-## Tuzatilgan muammolar
+## Tuzatilgan muammo
+Nazorat jadvalidan berilgan topshiriq xodim tomonidan bajarilib, direktor tomonidan tasdiqlangandan keyin ayrim holatlarda nazorat jadvalida ko‘rinmay qolgan.
 
-1. **Nazorat jadvali ustunlari**
-   - Jadval ustunlari endi faqat `Nazorat jadvali bandlari` konfiguratsiyasidan olinadi.
-   - Xodim topshiriqni bajarganda yoki direktor tasdiqlaganda yangi ustun qo'shilib ketmaydi.
-   - Faqat mavjud katak holati yangilanadi: `x`, `⏳`, `!`, `🔴`, `✓`.
+Sabab: tasdiqlash yoki tahrirlash vaqtida `[NazoratJadvali]` markeri bir qatorga tushib qolishi yoki izohdan ajralishi mumkin edi. Frontend jadval esa marker ma’lumotini qat’iy formatda o‘qigan.
 
-2. **Direktor tasdiqlaganda Telegram guruhga xabar yuborish**
-   - Endi mijoz Telegram guruhiga xabar avtomatik yuborilmaydi.
-   - Direktor `Tasdiqlash` tugmasini bosganda modal oyna ochiladi.
-   - Modal oynada checkbox bor: `Mijoz Telegram guruhiga “topshiriq bajarildi” xabarini yuborish`.
-   - Checkbox belgilanmasa, topshiriq faqat tizim ichida `Direktor tasdiqladi` bo'ladi.
-   - Checkbox belgilanganda, korxonaga bog'langan Telegram guruhga bajarildi xabari yuboriladi.
-
-## ENV
-
-Oldingi ENV lar saqlanadi. Quyidagi sozlama qo'shilishi mumkin:
-
-```text
-CUSTOMER_DONE_NOTIFY_DEFAULT=false
-```
-
-Tavsiya: `false`. Shunda direktor xohlamasa Telegram guruhga xabar ketmaydi.
-
-`CUSTOMER_DONE_NOTIFY_ENABLED=false` bo'lsa, Telegramga umuman yuborilmaydi. `true` yoki bo'sh bo'lsa, direktor checkbox belgilagan holatda yuboriladi.
+## Tuzatishlar
+- Backend `PUT /api/tasks/:id` va `POST /api/tasks/:id/confirm` vaqtida nazorat markerini saqlaydi.
+- Direktor tasdiqlash izohini o‘zgartirsa ham marker yo‘qolmaydi.
+- Frontend marker bir qatorga tushib qolgan bo‘lsa ham `Oy`, `Band`, `BandID` ni aniqlaydi.
+- Marker butunlay noto‘liq bo‘lsa ham `[Nazorat] ...` nomi, topshiriq turi va deadline oyi asosida jadvalga qaytarib ko‘rsatadi.
+- Supabase bazasi o‘chirilmaydi.
+- Yangi jadval/ustun/migration qo‘shilmaydi.
 
 ## Deploy
-
-Backend repo'da quyidagilar almashtiriladi:
+Repo’da quyidagilarni almashtiring:
 
 ```text
 server.js
@@ -39,8 +25,6 @@ README.md
 public/ijro-nazorati.html
 ```
 
-Keyin:
+Keyin GitHub’ga push qilib Render’da `Manual Deploy → Deploy latest commit` qiling.
 
-1. GitHub commit/push.
-2. Render: `Manual Deploy -> Deploy latest commit`.
-3. Tilda iframe allaqachon qo'yilgan bo'lsa, Tilda'ga tegilmaydi.
+Tilda iframe qo‘yilgan bo‘lsa, Tilda’ga tegmang.
