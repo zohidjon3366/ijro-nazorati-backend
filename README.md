@@ -1,42 +1,55 @@
-# Ijro nazorati — Stage 8.3.2
+# Stage 8.3.3 — Nazorat jadvali: “Topshirish zarur emas” yakuniy fix
 
-Stage 8.3.1 Final v2 asosida tayyorlangan qo‘shimcha fix.
+Ushbu paket Stage 8.3.2 asosida tayyorlandi. Hozirgi Supabase baza o‘chirilmaydi, yangi jadval/ustun/migration qo‘shilmaydi.
 
-## Muhim shart
+## Qo‘shilgan va tuzatilgan funksiyalar
 
-- Hozirgi Supabase baza o‘chirilmaydi.
-- Yangi jadval/ustun/migration qo‘shilmaydi.
-- Nazorat jadvali bandlari va ko‘rinadigan korxonalar sozlamalari Supabase Storage JSON orqali saqlanadi.
+1. **“Topshirish zarur emas” bosilganda xodim biriktirilmaydi**
+   - Nazorat jadvalidagi katakdan “Topshirish zarur emas” tanlansa, topshiriq `assignee_id = null` bilan saqlanadi.
+   - Bunday topshiriq xodimga yuborilmaydi.
 
-## Kiritilgan o‘zgarishlar
+2. **Xodim izohi direktor ko‘rishi uchun ajratildi**
+   - Xodim nazorat topshirig‘i izohiga “Topshirish zarur emas” deb yozsa, tizim uni direktor jadvalida alohida holat sifatida ko‘rsatadi.
+   - Jadvaldagi katak “Xodim: topshirish zarur emas” holatini ko‘rsatadi.
 
-1. Nazorat jadvalida ko‘rinadigan korxonalarni rahbar o‘zi belgilaydi.
-2. Jadvalda korxona nomi yoki STIR bo‘yicha filtr qo‘shildi.
-3. Katak ichida “Topshirish zarur emas” tugmasi qo‘shildi.
-4. “Topshirish zarur emas” holati jadvalda alohida `-` belgisi bilan ko‘rinadi.
-5. Barcha ko‘rinadigan korxonalarni belgilab, bitta band bo‘yicha ommaviy topshiriq berish qo‘shildi.
-6. Agar shu oy/korxona/band bo‘yicha topshiriq avval mavjud bo‘lsa, ommaviy yaratishda uni yangilash yoki o‘tkazib yuborish tanlanadi.
-7. Jadval ko‘rinishi zamonaviylashtirildi.
-8. Jadval pastga scroll qilinganda ustun nomlari ko‘rinib turishi uchun jadval ichki scroll va sticky header bilan ishlaydi.
-9. Supabase schema o‘zgarmaydi.
+3. **Topshirish zarur bo‘lmagan kataklar boshqacha ko‘rinadi**
+   - Bunday kataklar maxsus kulrang chiziqli ko‘rinishda chiqadi.
+   - Xodim tomonidan yozilgan holat sariq-kulrang ogohlantirish ko‘rinishida ajratiladi.
 
-## Deploy
+4. **Korxona + band bo‘yicha doimiy “zarur emas” qoidasi saqlandi**
+   - Masalan, bir korxonada NDS topshirish zarur bo‘lmasa, bu holat Supabase Storage JSON sozlamasida saqlanadi.
+   - Keyingi oy jadval ochilganda shu korxona va band avtomatik “Topshirish zarur emas” bo‘lib ko‘rinadi.
+   - Database schema o‘zgarmaydi.
 
-Repo’da quyidagilarni almashtiring:
+5. **“Zarur qilib qaytarish” tugmasi qo‘shildi**
+   - Rahbar oldin saqlangan “Topshirish zarur emas” qoidasini bekor qila oladi.
+   - Kerak bo‘lsa o‘sha katak yana oddiy topshiriq sifatida ishlatiladi.
 
-- `server.js`
-- `package.json`
-- `README.md`
-- `public/ijro-nazorati.html`
+## Saqlash mexanizmi
 
-Keyin GitHub’ga push qiling va Render’da `Manual Deploy → Deploy latest commit` qiling.
-
-Tilda iframe allaqachon qo‘yilgan bo‘lsa, Tilda’ga tegilmaydi.
-
-## Yangi ENV ixtiyoriy
-
-Alohida ENV shart emas. Istasangiz storage JSON yo‘lini o‘zgartirish mumkin:
+Quyidagi Storage JSON ishlatiladi:
 
 ```text
 CONTROL_SETTINGS_PATH=control-board/stage8_3_settings.json
 ```
+
+Ichida `companyIds` bilan birga `notRequiredItems` ham saqlanadi. Bu yangi jadval yoki ustun emas.
+
+## Deploy
+
+Repo’da quyidagi fayllarni almashtiring:
+
+```text
+server.js
+package.json
+README.md
+public/ijro-nazorati.html
+```
+
+Keyin GitHub’ga push qiling va Render’da:
+
+```text
+Manual Deploy → Deploy latest commit
+```
+
+Tilda iframe allaqachon qo‘yilgan bo‘lsa, Tilda’ga tegmang.
