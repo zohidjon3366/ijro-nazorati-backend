@@ -53,6 +53,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const ATTACHMENTS_BUCKET = process.env.ATTACHMENTS_BUCKET || 'task-attachments';
 const CONTROL_CONFIG_PATH = process.env.CONTROL_CONFIG_PATH || 'control-board/stage8_3_items.json';
+const CONTROL_SETTINGS_PATH = process.env.CONTROL_SETTINGS_PATH || 'control-board/stage8_3_settings.json';
 const MAX_ATTACHMENT_SIZE_MB = Number(process.env.MAX_ATTACHMENT_SIZE_MB || 25);
 
 const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
@@ -111,6 +112,46 @@ function normalizeControlItems(items) {
     })
     .filter(Boolean)
     .sort((a, b) => a.order - b.order || String(a.name).localeCompare(String(b.name)));
+}
+
+
+function normalizeControlSettings(settings) {
+  const raw = settings && typeof settings === 'object' ? settings : {};
+  const companyIds = Array.isArray(raw.companyIds || raw.company_ids)
+    ? (raw.companyIds || raw.company_ids).map(x => cleanText(x)).filter(Boolean)
+    : [];
+  return {
+    companyIds: [...new Set(companyIds)],
+    updatedAt: cleanText(raw.updatedAt || raw.updated_at || '')
+  };
+}
+
+async function readControlSettings() {
+  ensureDb();
+  const { data, error } = await supabase.storage.from(ATTACHMENTS_BUCKET).download(CONTROL_SETTINGS_PATH);
+  if (error) {
+    const code = String(error.statusCode || error.status || '');
+    const message = String(error.message || '').toLowerCase();
+    if (code === '404' || message.includes('not found')) return normalizeControlSettings({ companyIds: [] });
+    console.warn('Control settings read failed:', error.message);
+    return normalizeControlSettings({ companyIds: [] });
+  }
+  const text = await data.text();
+  const parsed = JSON.parse(text || '{}');
+  return normalizeControlSettings(parsed.settings || parsed);
+}
+
+async function writeControlSettings(settings) {
+  ensureDb();
+  const normalized = normalizeControlSettings(settings);
+  normalized.updatedAt = new Date().toISOString();
+  const payload = JSON.stringify({ version: '8.3.2', updatedAt: normalized.updatedAt, settings: normalized }, null, 2);
+  const { error } = await supabase.storage.from(ATTACHMENTS_BUCKET).upload(CONTROL_SETTINGS_PATH, Buffer.from(payload, 'utf8'), {
+    contentType: 'application/json; charset=utf-8',
+    upsert: true
+  });
+  if (error) throw error;
+  return normalized;
 }
 
 async function readControlItems() {
@@ -366,7 +407,9 @@ async function makePasswordHash(password) {
 async function getBootstrapData() {
   ensureDb();
   let controlItems = normalizeControlItems(DEFAULT_CONTROL_ITEMS);
+  let controlSettings = normalizeControlSettings({ companyIds: [] });
   try { controlItems = await readControlItems(); } catch (err) { console.warn('Control items fallback:', err.message); }
+  try { controlSettings = await readControlSettings(); } catch (err) { console.warn('Control settings fallback:', err.message); }
   const [usersRes, companiesRes, templatesRes, tasksRes, attachmentsRes] = await Promise.all([
     supabase.from('app_users').select('*').order('created_at', { ascending: true }),
     supabase.from('companies').select('*').order('created_at', { ascending: true }),
@@ -384,7 +427,8 @@ async function getBootstrapData() {
     companies: companiesRes.data.map(companyToClient),
     taskTemplates: templatesRes.data.map(templateToClient),
     tasks: tasksRes.data.map(t => taskToClient(t, audioTaskIds)),
-    controlItems
+    controlItems,
+    controlSettings
   };
 }
 
@@ -1004,6 +1048,24 @@ app.put('/api/control-items', async (req, res) => {
   try {
     const items = await writeControlItems(req.body?.items || []);
     return res.json({ ok: true, data: items });
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+
+app.get('/api/control-settings', async (req, res) => {
+  try {
+    const settings = await readControlSettings();
+    return res.json({ ok: true, data: settings });
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+
+app.put('/api/control-settings', async (req, res) => {
+  try {
+    const settings = await writeControlSettings(req.body?.settings || req.body || {});
+    return res.json({ ok: true, data: settings });
   } catch (err) {
     return handleError(res, err);
   }
