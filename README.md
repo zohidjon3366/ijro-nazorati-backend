@@ -1,66 +1,36 @@
-# Korxonalar bo‘yicha topshiriqlar va ijro nazorati tizimi — Stage 8.3
+# Ijro Nazorati — Stage 8.3.1 Final Fix
 
-Stage 8.3 Stage 8.2 stable asosida tayyorlandi. Asosiy qoida saqlangan: Supabase bazani o‘chirish, yangi jadval/ustun/migration qo‘shish talab qilinmaydi.
+Ushbu paket Stage 8.3.1 fix asosida tayyorlandi. Hozirgi Supabase baza o'chirilmaydi, yangi jadval/ustun/migration qo'shilmaydi.
 
-## Yangi funksiyalar
+## Tuzatilgan muammolar
 
-1. **Rahbar oylik nazorat jadvali**
-   - Menyuda faqat rahbar uchun `Nazorat jadvali` bo‘limi chiqadi.
-   - Jadval ko‘rinishi korxona × nazorat bandlari formatida.
-   - Oy tanlash maydoni bor: har oy alohida ko‘riladi.
-   - O‘tgan oylar mavjud topshiriqlar orqali saqlanadi.
+1. **Nazorat jadvali ustunlari**
+   - Jadval ustunlari endi faqat `Nazorat jadvali bandlari` konfiguratsiyasidan olinadi.
+   - Xodim topshiriqni bajarganda yoki direktor tasdiqlaganda yangi ustun qo'shilib ketmaydi.
+   - Faqat mavjud katak holati yangilanadi: `x`, `⏳`, `!`, `🔴`, `✓`.
 
-2. **Jadval kataklaridan topshiriq yaratish**
-   - Rahbar jadvaldagi kerakli katakni bosadi.
-   - Korxona, band va oy avtomatik tanlanadi.
-   - Mas’ul xodim, muddat, soat, muhimlik va status belgilanadi.
-   - Topshiriq mavjud `tasks` jadvaliga oddiy topshiriq sifatida yoziladi.
+2. **Direktor tasdiqlaganda Telegram guruhga xabar yuborish**
+   - Endi mijoz Telegram guruhiga xabar avtomatik yuborilmaydi.
+   - Direktor `Tasdiqlash` tugmasini bosganda modal oyna ochiladi.
+   - Modal oynada checkbox bor: `Mijoz Telegram guruhiga “topshiriq bajarildi” xabarini yuborish`.
+   - Checkbox belgilanmasa, topshiriq faqat tizim ichida `Direktor tasdiqladi` bo'ladi.
+   - Checkbox belgilanganda, korxonaga bog'langan Telegram guruhga bajarildi xabari yuboriladi.
 
-3. **Bandlarni rahbar sozlashi**
-   - `⚙ Bandlar` yoki `Bandlarni sozlash` tugmasi orqali yangi band qo‘shiladi.
-   - Band nomi, default muddat kuni, faol/nofaol holati va tartib raqami sozlanadi.
-   - Bandlar Supabase Storage ichidagi JSON faylda saqlanadi.
-   - Baza schema o‘zgarmaydi.
+## ENV
 
-4. **Rangli nazorat holatlari**
-   - `x` — topshiriq yo‘q / bajarilmagan.
-   - `⏳` — jarayonda.
-   - `!` — muddat yaqin.
-   - `🔴` — muddati o‘tgan.
-   - `✓` — bajarildi / direktor tasdiqladi.
-
-5. **Excel va Print/PDF**
-   - Jadval Excel `.xls` formatida yuklab olinadi.
-   - Print/PDF uchun browser print rejimi qo‘shilgan.
-
-## Saqlash mexanizmi
-
-Nazorat bandlari quyidagi storage faylda saqlanadi:
+Oldingi ENV lar saqlanadi. Quyidagi sozlama qo'shilishi mumkin:
 
 ```text
-CONTROL_CONFIG_PATH=control-board/stage8_3_items.json
+CUSTOMER_DONE_NOTIFY_DEFAULT=false
 ```
 
-Default bucket:
+Tavsiya: `false`. Shunda direktor xohlamasa Telegram guruhga xabar ketmaydi.
 
-```text
-ATTACHMENTS_BUCKET=task-attachments
-```
+`CUSTOMER_DONE_NOTIFY_ENABLED=false` bo'lsa, Telegramga umuman yuborilmaydi. `true` yoki bo'sh bo'lsa, direktor checkbox belgilagan holatda yuboriladi.
 
-Agar ENV kiritilmasa, mavjud `task-attachments` bucket ishlatiladi. Bu yangi database jadval yoki ustun emas, Supabase Storage faylidir.
+## Deploy
 
-## Muhim ENV lar
-
-Stage 8.2 dagi ENV lar saqlanadi. Stage 8.3 uchun ixtiyoriy ENV:
-
-```text
-ATTACHMENTS_BUCKET=task-attachments
-CONTROL_CONFIG_PATH=control-board/stage8_3_items.json
-```
-
-## Deploy tartibi
-
-Backend repo ichida quyidagilar almashtiriladi:
+Backend repo'da quyidagilar almashtiriladi:
 
 ```text
 server.js
@@ -71,33 +41,6 @@ public/ijro-nazorati.html
 
 Keyin:
 
-```text
-git add .
-git commit -m "Stage 8.3 director monthly control board"
-git push
-```
-
-Render’da:
-
-```text
-Manual Deploy → Deploy latest commit
-```
-
-Tilda’da iframe allaqachon qo‘yilgan bo‘lsa, Tilda’ga tegilmaydi.
-
-## Tekshiruv
-
-Deploydan keyin quyidagilar tekshiriladi:
-
-```text
-/health
-/app
-/api/bootstrap
-/api/control-items
-```
-
-Rahbar login bilan kirib, `Nazorat jadvali` bo‘limini oching.
-
-## Eslatma
-
-Stage 8.3 nazorat jadvali mavjud `tasks`, `companies`, `app_users` ma’lumotlariga tayanadi. O‘tgan oylar saqlanishi uchun topshiriqlar o‘chirilmasligi kerak.
+1. GitHub commit/push.
+2. Render: `Manual Deploy -> Deploy latest commit`.
+3. Tilda iframe allaqachon qo'yilgan bo'lsa, Tilda'ga tegilmaydi.
