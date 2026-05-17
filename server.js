@@ -52,6 +52,7 @@ const OPENAI_TRANSCRIPTION_LANGUAGE = process.env.OPENAI_TRANSCRIPTION_LANGUAGE 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const ATTACHMENTS_BUCKET = process.env.ATTACHMENTS_BUCKET || 'task-attachments';
+const CONTROL_CONFIG_PATH = process.env.CONTROL_CONFIG_PATH || 'control-board/stage8_3_items.json';
 const MAX_ATTACHMENT_SIZE_MB = Number(process.env.MAX_ATTACHMENT_SIZE_MB || 25);
 
 const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
@@ -69,6 +70,74 @@ function ensureDb() {
     err.status = 500;
     throw err;
   }
+}
+
+
+const DEFAULT_CONTROL_ITEMS = [
+  { id: 'ctrl-1c', name: '1C', defaultDay: 15, active: true, order: 10 },
+  { id: 'ctrl-xalq-banki', name: 'Xalq banki', defaultDay: 15, active: true, order: 20 },
+  { id: 'ctrl-pod-nalog', name: 'Pod nalog', defaultDay: 15, active: true, order: 30 },
+  { id: 'ctrl-platejka', name: 'Platejka', defaultDay: 15, active: true, order: 40 },
+  { id: 'ctrl-ediniy-nalog', name: 'Ediniy nalog', defaultDay: 15, active: true, order: 50 },
+  { id: 'ctrl-nds', name: 'NDS', defaultDay: 20, active: true, order: 60 },
+  { id: 'ctrl-mol-mulk', name: 'Mol-mulk solig‘i', defaultDay: 10, active: true, order: 70 },
+  { id: 'ctrl-yer-soligi', name: 'Yer solig‘i', defaultDay: 10, active: true, order: 80 },
+  { id: 'ctrl-suv-soligi', name: 'Suv solig‘i', defaultDay: 10, active: true, order: 90 },
+  { id: 'ctrl-schet-faktura', name: 'Schet faktura', defaultDay: 20, active: true, order: 100 }
+];
+
+function makeSlug(value) {
+  return String(value || 'band')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || ('band-' + Date.now());
+}
+
+function normalizeControlItems(items) {
+  const arr = Array.isArray(items) ? items : [];
+  return arr
+    .map((item, index) => {
+      const name = cleanText(item.name || item.title || '');
+      if (!name) return null;
+      return {
+        id: cleanText(item.id || ('ctrl-' + makeSlug(name))).slice(0, 90),
+        name: name.slice(0, 90),
+        defaultDay: Math.min(31, Math.max(1, Number(item.defaultDay ?? item.default_day ?? item.day ?? 15) || 15)),
+        active: item.active === undefined ? true : !!item.active,
+        order: Number(item.order ?? index * 10) || index * 10
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.order - b.order || String(a.name).localeCompare(String(b.name)));
+}
+
+async function readControlItems() {
+  ensureDb();
+  const { data, error } = await supabase.storage.from(ATTACHMENTS_BUCKET).download(CONTROL_CONFIG_PATH);
+  if (error) {
+    const code = String(error.statusCode || error.status || '');
+    const message = String(error.message || '').toLowerCase();
+    if (code === '404' || message.includes('not found')) return normalizeControlItems(DEFAULT_CONTROL_ITEMS);
+    console.warn('Control items config read failed:', error.message);
+    return normalizeControlItems(DEFAULT_CONTROL_ITEMS);
+  }
+  const text = await data.text();
+  const parsed = JSON.parse(text || '{}');
+  return normalizeControlItems(parsed.items || parsed);
+}
+
+async function writeControlItems(items) {
+  ensureDb();
+  const normalized = normalizeControlItems(items);
+  const payload = JSON.stringify({ version: '8.3', updatedAt: new Date().toISOString(), items: normalized }, null, 2);
+  const { error } = await supabase.storage.from(ATTACHMENTS_BUCKET).upload(CONTROL_CONFIG_PATH, Buffer.from(payload, 'utf8'), {
+    contentType: 'application/json; charset=utf-8',
+    upsert: true
+  });
+  if (error) throw error;
+  return normalized;
 }
 
 function onlyDigits(value) {
@@ -296,6 +365,8 @@ async function makePasswordHash(password) {
 
 async function getBootstrapData() {
   ensureDb();
+  let controlItems = normalizeControlItems(DEFAULT_CONTROL_ITEMS);
+  try { controlItems = await readControlItems(); } catch (err) { console.warn('Control items fallback:', err.message); }
   const [usersRes, companiesRes, templatesRes, tasksRes, attachmentsRes] = await Promise.all([
     supabase.from('app_users').select('*').order('created_at', { ascending: true }),
     supabase.from('companies').select('*').order('created_at', { ascending: true }),
@@ -312,7 +383,8 @@ async function getBootstrapData() {
     users: usersRes.data.map(userToClient),
     companies: companiesRes.data.map(companyToClient),
     taskTemplates: templatesRes.data.map(templateToClient),
-    tasks: tasksRes.data.map(t => taskToClient(t, audioTaskIds))
+    tasks: tasksRes.data.map(t => taskToClient(t, audioTaskIds)),
+    controlItems
   };
 }
 
@@ -913,6 +985,25 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/bootstrap', async (_, res) => {
   try {
     return res.json({ ok: true, data: await getBootstrapData() });
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+
+
+app.get('/api/control-items', async (req, res) => {
+  try {
+    const items = await readControlItems();
+    return res.json({ ok: true, data: items });
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+
+app.put('/api/control-items', async (req, res) => {
+  try {
+    const items = await writeControlItems(req.body?.items || []);
+    return res.json({ ok: true, data: items });
   } catch (err) {
     return handleError(res, err);
   }
