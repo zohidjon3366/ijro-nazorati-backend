@@ -120,8 +120,33 @@ function normalizeControlSettings(settings) {
   const companyIds = Array.isArray(raw.companyIds || raw.company_ids)
     ? (raw.companyIds || raw.company_ids).map(x => cleanText(x)).filter(Boolean)
     : [];
+  const nrRaw = raw.notRequiredItems || raw.not_required_items || raw.notRequired || raw.not_required || [];
+  const notRequiredItems = Array.isArray(nrRaw)
+    ? nrRaw.map((x) => {
+        if (!x || typeof x !== 'object') return null;
+        const companyId = cleanText(x.companyId || x.company_id || '');
+        const itemId = cleanText(x.itemId || x.item_id || '');
+        if (!companyId || !itemId) return null;
+        return {
+          companyId,
+          itemId,
+          note: cleanText(x.note || ''),
+          source: cleanText(x.source || 'director'),
+          updatedAt: cleanText(x.updatedAt || x.updated_at || '')
+        };
+      }).filter(Boolean)
+    : [];
+  const uniqueRules = [];
+  const seen = new Set();
+  for (const rule of notRequiredItems) {
+    const key = `${rule.companyId}::${rule.itemId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueRules.push(rule);
+  }
   return {
     companyIds: [...new Set(companyIds)],
+    notRequiredItems: uniqueRules,
     updatedAt: cleanText(raw.updatedAt || raw.updated_at || '')
   };
 }
@@ -145,7 +170,7 @@ async function writeControlSettings(settings) {
   ensureDb();
   const normalized = normalizeControlSettings(settings);
   normalized.updatedAt = new Date().toISOString();
-  const payload = JSON.stringify({ version: '8.3.2', updatedAt: normalized.updatedAt, settings: normalized }, null, 2);
+  const payload = JSON.stringify({ version: '8.3.3', updatedAt: normalized.updatedAt, settings: normalized }, null, 2);
   const { error } = await supabase.storage.from(ATTACHMENTS_BUCKET).upload(CONTROL_SETTINGS_PATH, Buffer.from(payload, 'utf8'), {
     contentType: 'application/json; charset=utf-8',
     upsert: true
@@ -1196,13 +1221,19 @@ app.post('/api/tasks', async (req, res) => {
     ensureDb();
     const payload = taskFromBody(req.body, true);
     if (!payload.company_id) return res.status(400).json({ ok: false, error: 'Korxona tanlang' });
-    if (!payload.assignee_id) return res.status(400).json({ ok: false, error: 'Xodim tanlang' });
+    const notRequiredControl = /\[TopshirishZarurEmas\]|Topshirish zarur emas/i.test(String([
+      payload.director_note,
+      payload.employee_note,
+      payload.description,
+      payload.title
+    ].filter(Boolean).join('\n')));
+    if (!payload.assignee_id && !notRequiredControl) return res.status(400).json({ ok: false, error: 'Xodim tanlang' });
     if (!payload.title) return res.status(400).json({ ok: false, error: 'Topshiriq nomi majburiy' });
     if (payload.status === 'Bajarildi') payload.completed_at = new Date().toISOString();
     const { data, error } = await supabase.from('tasks').insert(payload).select('*').single();
     if (error) throw error;
     await addTaskHistory(data.id, payload.created_by, payload.is_quick ? 'Tezkor topshiriq yaratildi' : 'Topshiriq yaratildi', null, data.status, data.description);
-    notifyTaskCreatedAsync(data);
+    if (data.assignee_id) notifyTaskCreatedAsync(data);
     return res.json({ ok: true, data: taskToClient(data) });
   } catch (err) {
     return handleError(res, err);
