@@ -1,6 +1,6 @@
 {
-  "name": "tilda-ijro-nazorati-backend-stage8-3-2",
-  "version": "8.3.2",
+  "name": "tilda-ijro-nazorati-backend-stage8-3-3",
+  "version": "8.3.3",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -15,5 +15,5 @@
     "express": "^4.19.2",
     "multer": "^1.4.5-lts.1"
   },
-  "description": "Ijro Nazorati Stage 8.3.2: control table column stability fix; status changes no longer create extra columns; no DB schema changes"
+  "description": "Ijro Nazorati Stage 8.3.3: assignment-free not-required control tasks, employee not-required visibility, persistent monthly not-required rules; no DB schema changes"
 }
