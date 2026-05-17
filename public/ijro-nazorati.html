@@ -147,6 +147,10 @@ body{font-family:"Manrope",Inter,Arial,sans-serif} h1,h2,h3,h4,b,.btn,.menu butt
 
 @media print{.topbar,.layout>.panel:first-child,.panel-head .btn,.control-board-toolbar,.control-legend,.control-board-summary{display:none!important}.layout{display:block}.panel{box-shadow:none!important}.control-print-title{display:block;font-size:18px;font-weight:900;margin-bottom:12px}.control-board-wrap{overflow:visible;border:0}.control-board-table{min-width:0;font-size:10px}.control-board-table .sticky-col{position:static}}
 
+
+/* Stage 8.3.3 — persistent "Topshirish zarur emas" rules and clearer NA cells */
+.control-cell.ctrl-na,.control-cell.ctrl-na-saved,.control-cell.ctrl-na-employee{background:linear-gradient(135deg,rgba(100,116,139,.18),rgba(148,163,184,.10));border-color:rgba(100,116,139,.35);color:var(--text)!important;position:relative;overflow:hidden}.control-cell.ctrl-na:before,.control-cell.ctrl-na-saved:before,.control-cell.ctrl-na-employee:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(135deg,rgba(100,116,139,.12) 0,rgba(100,116,139,.12) 8px,transparent 8px,transparent 16px);pointer-events:none}.control-cell.ctrl-na .sym,.control-cell.ctrl-na .meta,.control-cell.ctrl-na-saved .sym,.control-cell.ctrl-na-saved .meta,.control-cell.ctrl-na-employee .sym,.control-cell.ctrl-na-employee .meta{position:relative;z-index:1}.control-cell.ctrl-na-saved{background:linear-gradient(135deg,rgba(71,85,105,.22),rgba(226,232,240,.16))}.control-cell.ctrl-na-employee{background:linear-gradient(135deg,rgba(245,158,11,.22),rgba(251,191,36,.12));border-color:rgba(245,158,11,.45)}.control-na-info{border:1px solid var(--line);border-radius:18px;padding:13px 14px;background:linear-gradient(135deg,rgba(100,116,139,.10),rgba(148,163,184,.06));margin:0 0 14px;color:var(--text)}.control-na-info b{display:block;margin-bottom:4px}.control-cell-modal-head .na-pill{display:inline-flex;border-radius:999px;padding:5px 9px;background:rgba(100,116,139,.15);font-size:12px;font-weight:900}.control-cell .meta{max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.control-board-table thead th{z-index:5}.control-board-table thead .sticky-col{z-index:7}
+
 </style>
 </head>
 <body>
@@ -1143,6 +1147,132 @@ async function confirmTask(id){ openConfirmTaskModal(id); }
 async function deleteTask(){ if(!confirm('Topshiriq o‘chirilsinmi?')) return; try{ await api('/api/tasks/'+editingTaskId,{method:'DELETE'}); await loadData(); closeModal(); render(); }catch(err){ alert(err.message); } }
 function filterTable(tableId,q){ if(tableId==='companiesTable') updateCompanySearch(q); }
 function filterTasks(){ applyTaskSearch(); updateTaskStatus($('statusFilter')?.value||''); }
+
+
+// ================= Stage 8.3.3 fix — "Topshirish zarur emas" assignment-free and persistent rules =================
+normControlSettings = function(settings){
+  const raw=settings&&typeof settings==='object'?settings:{};
+  const ids=Array.isArray(raw.companyIds||raw.company_ids)?(raw.companyIds||raw.company_ids):[];
+  const nrRaw=raw.notRequiredItems||raw.not_required_items||raw.notRequired||raw.not_required||[];
+  const notRequiredItems=Array.isArray(nrRaw)?nrRaw.map(x=>{
+    if(!x||typeof x!=='object') return null;
+    const companyId=String(x.companyId||x.company_id||'').trim();
+    const itemId=String(x.itemId||x.item_id||'').trim();
+    if(!companyId||!itemId) return null;
+    return {companyId,itemId,note:String(x.note||'').trim(),source:String(x.source||'director').trim()||'director',updatedAt:String(x.updatedAt||x.updated_at||'').trim()};
+  }).filter(Boolean):[];
+  const unique=[]; const seen=new Set();
+  notRequiredItems.forEach(r=>{ const k=r.companyId+'::'+r.itemId; if(!seen.has(k)){ seen.add(k); unique.push(r); } });
+  return {companyIds:[...new Set(ids.map(x=>String(x||'').trim()).filter(Boolean))],notRequiredItems:unique,updatedAt:raw.updatedAt||raw.updated_at||''};
+};
+controlSettings = function(){ state.controlSettings=normControlSettings(state.controlSettings); return state.controlSettings; };
+function controlNotRequiredKey(companyId,itemId){ return String(companyId||'')+'::'+String(itemId||''); }
+function controlNotRequiredRules(){ return controlSettings().notRequiredItems||[]; }
+function controlSavedNotRequiredRule(companyId,itemId){ const key=controlNotRequiredKey(companyId,itemId); return controlNotRequiredRules().find(r=>controlNotRequiredKey(r.companyId,r.itemId)===key)||null; }
+function controlNotRequiredSource(task){
+  const d=String(task?.directorNote||task?.director_note||'');
+  const e=String(task?.employeeNote||task?.employee_note||'');
+  const desc=String(task?.description||'');
+  const title=String(task?.title||'');
+  if(/\[TopshirishZarurEmas\]|Topshirish zarur emas/i.test(e)) return 'employee';
+  if(/\[TopshirishZarurEmas\]|Topshirish zarur emas/i.test(d)) return 'director';
+  if(/\[TopshirishZarurEmas\]|Topshirish zarur emas/i.test(desc+'\n'+title)) return 'system';
+  return '';
+}
+isControlNotRequired = function(task){ return !!controlNotRequiredSource(task); };
+controlStatus = function(task){
+  if(!task) return {cls:'ctrl-empty',sym:'x',label:'Topshiriq yo‘q'};
+  const naSource=controlNotRequiredSource(task);
+  if(naSource==='employee') return {cls:'ctrl-na ctrl-na-employee',sym:'-',label:'Xodim: topshirish zarur emas'};
+  if(naSource) return {cls:'ctrl-na',sym:'-',label:'Topshirish zarur emas'};
+  if(task.status==='Bekor qilindi'||task.status==='Bajarilmadi') return {cls:'ctrl-cancel',sym:'-',label:task.status};
+  if(task.status==='Direktor tasdiqladi') return {cls:'ctrl-done',sym:'✓',label:'Tasdiqlandi'};
+  if(task.status==='Bajarildi') return {cls:'ctrl-review',sym:'✓',label:'Tasdiq kutmoqda'};
+  if(isOverdue(task)) return {cls:'ctrl-overdue',sym:'🔴',label:'Muddati o‘tgan'};
+  const ms=remainingMs(task); if(ms!==null && ms>=0 && ms<=86400000) return {cls:'ctrl-due',sym:'!',label:'Muddat yaqin'};
+  return {cls:'ctrl-progress',sym:'⏳',label:task.status||'Jarayonda'};
+};
+function controlCellState(companyId,item,month){
+  const task=controlTaskFor(companyId,item.id,month);
+  if(task) return {task,rule:null,status:controlStatus(task)};
+  const rule=controlSavedNotRequiredRule(companyId,item.id);
+  if(rule) return {task:null,rule,status:{cls:'ctrl-na ctrl-na-saved',sym:'-',label:'Topshirish zarur emas'}};
+  return {task:null,rule:null,status:{cls:'ctrl-empty',sym:'x',label:'Topshiriq yo‘q'}};
+}
+controlBoardStats = function(month){ const companies=controlVisibleCompanies(); const items=controlItemsForMonth(month); let done=0, review=0, overdue=0, empty=0, due=0, na=0, total=companies.length*items.length; companies.forEach(c=>items.forEach(item=>{ const cell=controlCellState(c.id,item,month); const st=cell.status; if(String(st.cls).includes('ctrl-na')) na++; else if(!cell.task) empty++; else if(st.cls==='ctrl-done') done++; else if(st.cls==='ctrl-review') review++; else if(st.cls==='ctrl-overdue') overdue++; else if(st.cls==='ctrl-due') due++; })); return {total,done,review,overdue,empty,due,na}; };
+controlBoardView = function(){
+  const month=controlBoardMonth;
+  const items=controlItemsForMonth(month);
+  const companies=controlVisibleCompanies();
+  const st=controlBoardStats(month);
+  const selectedCount=controlSelectedCompanyIds().length;
+  const head=items.map(item=>`<th title="Default muddat: ${item.defaultDay}-sana"><span class="control-head-name">${escapeHtml(item.name)}</span><span class="control-head-date">${item.defaultDay}-sana</span></th>`).join('');
+  const body=companies.map(c=>`<tr><td class="sticky-col"><span class="control-company-name">${escapeHtml(c.name)}</span><span class="control-company-tin">STIR: ${escapeHtml(c.tin||'-')}</span></td>${items.map(item=>{ const cell=controlCellState(c.id,item,month); const task=cell.task; const cs=cell.status; const assignee=(task && !String(cs.cls).includes('ctrl-na'))?(byId(state.users,task.assigneeId)?.name||'-'):''; const meta=String(cs.cls).includes('ctrl-na')?'Zarur emas':(assignee||cs.label); return `<td><button class="control-cell ${cs.cls}" title="${escapeHtml(cs.label+(assignee?' · '+assignee:''))}" onclick="openControlCell('${c.id}','${item.id}')"><span class="sym">${cs.sym}</span><span class="meta">${escapeHtml(meta)}</span></button></td>`; }).join('')}</tr>`).join('');
+  return `<div class="control-print-title">Rahbar oylik nazorat jadvali — ${escapeHtml(month)}</div><div class="control-board-modern"><div class="hint" style="margin-top:0"><b>Faqat rahbar bo‘limi.</b> Ko‘rinadigan korxonalar, bandlar va “Topshirish zarur emas” qoidalari Supabase Storage JSON’da saqlanadi. Hozirgi baza jadval/ustunlariga tegilmaydi.</div><div class="control-board-toolbar"><div class="field-mini"><label>Oy</label><input type="month" value="${escapeHtml(month)}" onchange="setControlMonth(this.value)"></div><div class="field-mini control-filter-input"><label>Korxona filtri</label><input placeholder="Nomi yoki STIR bo‘yicha qidirish" value="${escapeHtml(controlCompanyFilter)}" oninput="setControlCompanyFilter(this.value)"></div><span class="control-visible-chip">Ko‘rinadi: ${companies.length} ta${selectedCount?` / tanlangan ${selectedCount} ta`:''}</span><span class="control-toolbar-spacer"></span><button class="btn secondary" onclick="openControlCompaniesModal()">🏢 Korxonalar</button><button class="btn" onclick="openControlBulkModal()">Barcha ko‘rinadiganlarga topshiriq</button><button class="btn secondary" onclick="exportControlMatrixExcel()">Excel</button><button class="btn ghost" onclick="window.print()">Print / PDF</button><button class="btn" onclick="openControlItemsModal()">⚙ Bandlar</button></div><div class="control-board-summary"><div class="today-plan-card"><span>Jami kataklar</span><b>${st.total}</b></div><div class="today-plan-card"><span>Tasdiqlangan</span><b>${st.done}</b></div><div class="today-plan-card"><span>Tasdiq kutmoqda</span><b>${st.review}</b></div><div class="today-plan-card"><span>Muddat yaqin</span><b>${st.due}</b></div><div class="today-plan-card"><span>Kechikkan</span><b>${st.overdue}</b></div><div class="today-plan-card"><span>Zarur emas</span><b>${st.na}</b></div><div class="today-plan-card"><span>Topshiriq yo‘q</span><b>${st.empty}</b></div></div><div class="control-legend"><span class="badge green">✓ Tasdiqlandi</span><span class="badge yellow">✓ Tasdiq kutmoqda</span><span class="badge blue">⏳ Jarayonda</span><span class="badge yellow">! Muddat yaqin</span><span class="badge red">🔴 Kechikkan</span><span class="badge gray">- Topshirish zarur emas</span><span class="badge gray">x Topshiriq yo‘q</span></div><div class="control-board-wrap"><table class="control-board-table" id="controlBoardTable"><thead><tr><th class="sticky-col">Firma nomi</th>${head}</tr></thead><tbody>${body || `<tr><td colspan="${items.length+1}"><div class="empty">Tanlangan filtr bo‘yicha korxona topilmadi.</div></td></tr>`}</tbody></table></div></div>`;
+};
+buildControlPayload = function(companyId,item,overrides={}){ const company=byId(state.companies,companyId); const time=overrides.time||'18:00'; const payload={companyId,templateId:null,title:`[Nazorat] ${item.name} — ${company?.name||''}`,type:item.name,deadline:overrides.deadline||controlDefaultDeadline(controlBoardMonth,item),priority:overrides.priority||'Muhim',status:overrides.status||'Yangi',description:`Rahbar oylik nazorat jadvali. Oy: ${controlBoardMonth}. Band: ${item.name}.`,directorNote:overrides.directorNote!==undefined?overrides.directorNote:controlMarkerNote(controlBoardMonth,item,overrides.note||'',time),isQuick:false,isActive:true,createdBy:currentUser.id,actorId:currentUser.id}; if(Object.prototype.hasOwnProperty.call(overrides,'assigneeId')) payload.assigneeId=overrides.assigneeId||null; else payload.assigneeId=activeUsers()[0]?.id||null; return payload; };
+async function saveControlNotRequiredRule(companyId,itemId,note='',source='director'){
+  const settings=controlSettings(); const key=controlNotRequiredKey(companyId,itemId); const now=new Date().toISOString();
+  const rules=controlNotRequiredRules().filter(r=>controlNotRequiredKey(r.companyId,r.itemId)!==key);
+  rules.push({companyId,itemId,note:String(note||'').trim(),source,updatedAt:now});
+  const newSettings={...settings,notRequiredItems:rules,updatedAt:now};
+  const r=await api('/api/control-settings',{method:'PUT',body:JSON.stringify({settings:newSettings})});
+  state.controlSettings=r.data||newSettings; saveBootstrapCache();
+}
+async function removeControlNotRequiredRule(companyId,itemId){
+  const settings=controlSettings(); const key=controlNotRequiredKey(companyId,itemId); const now=new Date().toISOString();
+  const rules=controlNotRequiredRules().filter(r=>controlNotRequiredKey(r.companyId,r.itemId)!==key);
+  const newSettings={...settings,notRequiredItems:rules,updatedAt:now};
+  const r=await api('/api/control-settings',{method:'PUT',body:JSON.stringify({settings:newSettings})});
+  state.controlSettings=r.data||newSettings; saveBootstrapCache();
+}
+openControlCell = function(companyId,itemId){
+  const item=controlItemsForMonth(controlBoardMonth).find(x=>x.id===itemId); const company=byId(state.companies,companyId); if(!item||!company) return alert('Ma’lumot topilmadi');
+  const task=controlTaskFor(companyId,itemId,controlBoardMonth); const savedRule=controlSavedNotRequiredRule(companyId,itemId);
+  const t=task||{assigneeId:activeUsers()[0]?.id||'',deadline:controlDefaultDeadline(controlBoardMonth,item),priority:'Muhim',status:'Yangi',directorNote:savedRule?.note||''};
+  const time=getTaskTime(t)||'18:00'; const cleanNote=stripControlTechnicalMarkers(t.directorNote||savedRule?.note||'');
+  const naInfo=savedRule&&!task?`<div class="control-na-info"><b>Bu korxona bo‘yicha ushbu band topshirish zarur emas deb saqlangan.</b><span>Keyingi oylarda ham jadvalda avtomatik “Zarur emas” ko‘rinadi. Kerak bo‘lsa quyidagi tugma orqali qaytarishingiz mumkin.</span></div>`:'';
+  const taskInfo=task&&isControlNotRequired(task)?`<div class="control-na-info"><b>Joriy oy topshirish zarur emas.</b><span>${controlNotRequiredSource(task)==='employee'?'Bu holat xodim izohidan aniqlandi va direktorga ko‘rsatildi.':'Bu holat direktor tomonidan belgilangan.'}</span></div>`:'';
+  showModal('Nazorat jadvali katagi', `${naInfo}${taskInfo}<div class="control-cell-modal-head"><b>${escapeHtml(company.name)}</b><span>${escapeHtml(item.name)} · ${escapeHtml(controlBoardMonth)}</span>${(task||savedRule)?`<span class="na-pill">${escapeHtml(controlCellState(companyId,item,controlBoardMonth).status.label)}</span>`:''}</div><div class="form-grid"><div><label>Mas’ul xodim</label><select id="cb_assignee">${state.users.filter(u=>u.role==='employee'&&(u.isActive||u.id===t.assigneeId)).map(u=>`<option value="${u.id}" ${u.id===t.assigneeId?'selected':''}>${escapeHtml(u.name)}${u.isActive?'':' (to‘xtatilgan)'}</option>`).join('')}</select></div><div><label>Muddat va soat</label><div class="time-inline"><input id="cb_deadline" type="date" value="${escapeHtml(t.deadline||controlDefaultDeadline(controlBoardMonth,item))}"><input id="cb_time" type="time" value="${escapeHtml(time)}"></div></div><div><label>Muhimlik</label><select id="cb_priority">${priorities.map(x=>`<option ${x===t.priority?'selected':''}>${x}</option>`).join('')}</select></div><div><label>Status</label><select id="cb_status">${statusList.map(x=>`<option ${x===t.status?'selected':''}>${x}</option>`).join('')}</select></div><div class="full"><label>Izoh</label><textarea id="cb_note">${escapeHtml(cleanNote)}</textarea></div></div>${task?taskInlineHistoryBlock(task.id):''}<div class="actions">${task?`<button class="btn secondary" onclick="openTaskModal('${task.id}')">To‘liq tahrirlash</button>`:''}${(savedRule||isControlNotRequired(task))?`<button class="btn secondary" onclick="restoreControlRequired('${company.id}','${item.id}','${task?task.id:''}')">Zarur qilib qaytarish</button>`:''}<button class="btn warning" onclick="markControlNotRequired('${company.id}','${item.id}','${task?task.id:''}')">Topshirish zarur emas</button><button class="btn ghost" onclick="closeModal()">Bekor qilish</button><button class="btn" onclick="saveControlTask('${company.id}','${item.id}','${task?task.id:''}')">Saqlash</button></div>`);
+  if(task) setTimeout(()=>loadInlineTaskHistory(task.id),0);
+};
+markControlNotRequired = async function(companyId,itemId,taskId=''){
+  try{
+    const item=controlItemsForMonth(controlBoardMonth).find(x=>x.id===itemId); if(!item||!byId(state.companies,companyId)) return alert('Ma’lumot topilmadi');
+    if(!confirm('Ushbu korxona bo‘yicha bu band “Topshirish zarur emas” deb belgilanadimi? Keyingi oylar uchun ham eslab qolinadi.')) return;
+    const note=$('cb_note')?.value||'Bu korxona bo‘yicha ushbu hisobot/topshiriq topshirilishi talab qilinmaydi.';
+    await saveControlNotRequiredRule(companyId,itemId,note,'director');
+    const payload=buildControlPayload(companyId,item,{assigneeId:null,deadline:$('cb_deadline')?.value||controlDefaultDeadline(controlBoardMonth,item),priority:$('cb_priority')?.value||'Oddiy',status:'Bekor qilindi',directorNote:controlNotRequiredNote(controlBoardMonth,item,note,$('cb_time')?.value||'18:00')});
+    await api(taskId?'/api/tasks/'+taskId:'/api/tasks',{method:taskId?'PUT':'POST',body:JSON.stringify(payload)});
+    await loadData(); closeModal(); render();
+  }catch(err){ alert(err.message); }
+};
+async function restoreControlRequired(companyId,itemId,taskId=''){
+  try{
+    if(!confirm('Bu korxona bo‘yicha ushbu band yana topshiriladigan qilib qaytarilsinmi?')) return;
+    await removeControlNotRequiredRule(companyId,itemId);
+    if(taskId){
+      const task=byId(state.tasks,taskId); const item=controlItemsForMonth(controlBoardMonth).find(x=>x.id===itemId);
+      if(task&&item&&isControlNotRequired(task)){
+        const payload=buildControlPayload(companyId,item,{assigneeId:$('cb_assignee')?.value||activeUsers()[0]?.id||'',deadline:$('cb_deadline')?.value||controlDefaultDeadline(controlBoardMonth,item),priority:$('cb_priority')?.value||'Muhim',status:'Yangi',note:$('cb_note')?.value||'',time:$('cb_time')?.value||'18:00'});
+        await api('/api/tasks/'+taskId,{method:'PUT',body:JSON.stringify(payload)});
+      }
+    }
+    await loadData(); closeModal(); render();
+  }catch(err){ alert(err.message); }
+}
+saveEmployeeUpdate = async function(){
+  try{
+    const status=$('e_status').value; const note=$('e_note').value; const t=byId(state.tasks,editingTaskId); const marker=controlMarker(t);
+    if(marker && /Topshirish zarur emas/i.test(note)){
+      await api('/api/tasks/'+editingTaskId,{method:'PUT',body:JSON.stringify({status:'Bajarilmadi',employeeNote:'[TopshirishZarurEmas]\n'+note,actorId:currentUser.id})});
+    } else {
+      await api('/api/tasks/'+editingTaskId,{method:'PUT',body:JSON.stringify({status,employeeNote:note,actorId:currentUser.id})});
+    }
+    await loadData(); closeModal(); render();
+  }catch(err){ alert(err.message); }
+};
+
 document.addEventListener('keydown', e=>{ if(!currentUser && e.key==='Enter' && $('login') && $('password')) login(); });
 init();
 </script>
