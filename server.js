@@ -1200,7 +1200,7 @@ app.put('/api/tasks/:id', async (req, res) => {
     if (payload.status && payload.status !== oldTask.status) {
       await addTaskHistory(data.id, actorId, 'Status o‘zgardi', oldTask.status, data.status, data.employee_note || data.director_note || '');
       await notifyDirectorsTaskStatusChanged(data, oldTask.status);
-      if (data.status === 'Direktor tasdiqladi' && oldTask.status !== 'Direktor tasdiqladi') notifyCustomerTaskDone(data).catch(err => console.warn('Customer done notify async failed:', err.message));
+      if (data.status === 'Direktor tasdiqladi' && oldTask.status !== 'Direktor tasdiqladi' && customerDoneNotifyRequested(req.body)) notifyCustomerTaskDone(data).catch(err => console.warn('Customer done notify async failed:', err.message));
     } else {
       await addTaskHistory(data.id, actorId, 'Topshiriq tahrirlandi', oldTask.status, data.status, data.employee_note || data.director_note || '');
     }
@@ -1210,12 +1210,21 @@ app.put('/api/tasks/:id', async (req, res) => {
   }
 });
 
+function preserveControlMarkerOnConfirm(oldNote, newNote) {
+  const oldText = cleanText(oldNote || '');
+  const incoming = cleanText(newNote || '');
+  const marker = oldText.match(/\[NazoratJadvali\][\s\S]*?(?=\n\[|$)/i)?.[0] || '';
+  if (!incoming) return oldText || 'Tasdiqlandi.';
+  if (marker && !/\[NazoratJadvali\]/i.test(incoming)) return `${incoming}\n${marker}`;
+  return incoming || oldText || 'Tasdiqlandi.';
+}
+
 app.post('/api/tasks/:id/confirm', async (req, res) => {
   try {
     ensureDb();
     const oldTask = await getById('tasks', req.params.id);
     if (!oldTask) return res.status(404).json({ ok: false, error: 'Topshiriq topilmadi' });
-    const note = cleanText(req.body.directorNote || oldTask.director_note || 'Tasdiqlandi.');
+    const note = preserveControlMarkerOnConfirm(oldTask.director_note, req.body.directorNote || req.body.director_note || '');
     const { data, error } = await supabase.from('tasks').update({
       status: 'Direktor tasdiqladi',
       director_note: note,
@@ -1223,7 +1232,7 @@ app.post('/api/tasks/:id/confirm', async (req, res) => {
     }).eq('id', req.params.id).select('*').single();
     if (error) throw error;
     await addTaskHistory(data.id, req.body.actorId || null, 'Direktor tasdiqladi', oldTask.status, data.status, note);
-    if (oldTask.status !== 'Direktor tasdiqladi') notifyCustomerTaskDone(data).catch(err => console.warn('Customer done notify async failed:', err.message));
+    if (oldTask.status !== 'Direktor tasdiqladi' && customerDoneNotifyRequested(req.body)) notifyCustomerTaskDone(data).catch(err => console.warn('Customer done notify async failed:', err.message));
     return res.json({ ok: true, data: taskToClient(data) });
   } catch (err) {
     return handleError(res, err);
@@ -1701,6 +1710,19 @@ setInterval(() => {
 
 // ================= Stage 8.0 — customer completion notice and printable PDF reports =================
 // Baza strukturasini o'zgartirmaydi. Telegram guruhga yakuniy xabar group_id -> company_id env xaritasi orqali yuboriladi.
+// Stage 8.3.1 update: mijoz Telegram guruhiga xabar faqat direktor tasdiqlash paytida belgilasa yuboriladi.
+function envBool(name, fallback = false) {
+  const v = process.env[name];
+  if (v === undefined || v === null || String(v).trim() === '') return !!fallback;
+  return ['1','true','yes','ha','on'].includes(String(v).trim().toLowerCase());
+}
+function customerDoneNotifyRequested(body = {}) {
+  const keys = ['notifyCustomer','notify_customer','customerDoneNotify','customer_done_notify','sendCustomerTelegram','send_customer_telegram'];
+  for (const k of keys) {
+    if (Object.prototype.hasOwnProperty.call(body, k)) return body[k] === true || body[k] === 1 || String(body[k]).toLowerCase() === 'true';
+  }
+  return envBool('CUSTOMER_DONE_NOTIFY_DEFAULT', false);
+}
 function telegramGroupIdForCompany(companyId) {
   const map = telegramCompanyMap();
   for (const [chatId, mappedCompanyId] of Object.entries(map || {})) {
