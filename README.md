@@ -1,30 +1,42 @@
-# Stage 8.3.1 Final v2 — Nazorat jadvali marker fix
+# Ijro nazorati — Stage 8.3.2
 
-Ushbu patch Stage 8.3.1 Final ustiga qo‘yiladi.
+Stage 8.3.1 Final v2 asosida tayyorlangan qo‘shimcha fix.
 
-## Tuzatilgan muammo
-Nazorat jadvalidan berilgan topshiriq xodim tomonidan bajarilib, direktor tomonidan tasdiqlangandan keyin ayrim holatlarda nazorat jadvalida ko‘rinmay qolgan.
+## Muhim shart
 
-Sabab: tasdiqlash yoki tahrirlash vaqtida `[NazoratJadvali]` markeri bir qatorga tushib qolishi yoki izohdan ajralishi mumkin edi. Frontend jadval esa marker ma’lumotini qat’iy formatda o‘qigan.
-
-## Tuzatishlar
-- Backend `PUT /api/tasks/:id` va `POST /api/tasks/:id/confirm` vaqtida nazorat markerini saqlaydi.
-- Direktor tasdiqlash izohini o‘zgartirsa ham marker yo‘qolmaydi.
-- Frontend marker bir qatorga tushib qolgan bo‘lsa ham `Oy`, `Band`, `BandID` ni aniqlaydi.
-- Marker butunlay noto‘liq bo‘lsa ham `[Nazorat] ...` nomi, topshiriq turi va deadline oyi asosida jadvalga qaytarib ko‘rsatadi.
-- Supabase bazasi o‘chirilmaydi.
+- Hozirgi Supabase baza o‘chirilmaydi.
 - Yangi jadval/ustun/migration qo‘shilmaydi.
+- Nazorat jadvali bandlari va ko‘rinadigan korxonalar sozlamalari Supabase Storage JSON orqali saqlanadi.
+
+## Kiritilgan o‘zgarishlar
+
+1. Nazorat jadvalida ko‘rinadigan korxonalarni rahbar o‘zi belgilaydi.
+2. Jadvalda korxona nomi yoki STIR bo‘yicha filtr qo‘shildi.
+3. Katak ichida “Topshirish zarur emas” tugmasi qo‘shildi.
+4. “Topshirish zarur emas” holati jadvalda alohida `-` belgisi bilan ko‘rinadi.
+5. Barcha ko‘rinadigan korxonalarni belgilab, bitta band bo‘yicha ommaviy topshiriq berish qo‘shildi.
+6. Agar shu oy/korxona/band bo‘yicha topshiriq avval mavjud bo‘lsa, ommaviy yaratishda uni yangilash yoki o‘tkazib yuborish tanlanadi.
+7. Jadval ko‘rinishi zamonaviylashtirildi.
+8. Jadval pastga scroll qilinganda ustun nomlari ko‘rinib turishi uchun jadval ichki scroll va sticky header bilan ishlaydi.
+9. Supabase schema o‘zgarmaydi.
 
 ## Deploy
+
 Repo’da quyidagilarni almashtiring:
 
+- `server.js`
+- `package.json`
+- `README.md`
+- `public/ijro-nazorati.html`
+
+Keyin GitHub’ga push qiling va Render’da `Manual Deploy → Deploy latest commit` qiling.
+
+Tilda iframe allaqachon qo‘yilgan bo‘lsa, Tilda’ga tegilmaydi.
+
+## Yangi ENV ixtiyoriy
+
+Alohida ENV shart emas. Istasangiz storage JSON yo‘lini o‘zgartirish mumkin:
+
 ```text
-server.js
-package.json
-README.md
-public/ijro-nazorati.html
+CONTROL_SETTINGS_PATH=control-board/stage8_3_settings.json
 ```
-
-Keyin GitHub’ga push qilib Render’da `Manual Deploy → Deploy latest commit` qiling.
-
-Tilda iframe qo‘yilgan bo‘lsa, Tilda’ga tegmang.
