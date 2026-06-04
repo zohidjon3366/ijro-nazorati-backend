@@ -155,6 +155,10 @@ body{font-family:"Manrope",Inter,Arial,sans-serif} h1,h2,h3,h4,b,.btn,.menu butt
 /* Stage 8.3.4 — large task lists and bulk problem delete */
 .task-bulk-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:16px;background:linear-gradient(135deg,rgba(239,83,80,.06),rgba(245,158,11,.05));padding:10px 12px;margin:0 0 12px}.task-bulk-toolbar .bulk-counter{font-size:12px;font-weight:900;color:var(--text-soft);margin-right:auto}.task-select-cell{width:38px;text-align:center}.task-row-problem td{background:rgba(239,83,80,.045)}.page-size-control select{min-width:86px}.soft-danger-note{font-size:12px;color:var(--text-soft);font-weight:800}
 
+
+/* Stage 8.3.5 — company status sorting and terminated company view */
+.company-status-terminated td{background:linear-gradient(90deg,rgba(239,83,80,.10),rgba(239,83,80,.03))!important}.company-status-paused td{background:rgba(148,163,184,.055)!important}.badge.terminated{background:rgba(127,29,29,.16);color:#991b1b;border:1px solid rgba(127,29,29,.18)}.badge.paused{background:rgba(100,116,139,.16);color:#475569}.company-status-caption{display:block;margin-top:4px;font-size:11px;color:var(--text-soft);font-weight:800}.company-link.terminated{color:#991b1b;text-decoration:line-through;text-decoration-thickness:1px;text-decoration-color:rgba(153,27,27,.45)}
+
 </style>
 </head>
 <body>
@@ -1308,6 +1312,78 @@ saveEmployeeUpdate = async function(){
 
 document.addEventListener('keydown', e=>{ if(!currentUser && e.key==='Enter' && $('login') && $('password')) login(); });
 init();
+
+// ================= Stage 8.3.5 — korxona statuslari, saralash va Telegram xabarlari =================
+const COMPANY_STATUS_LABELS = { active:'Faol', paused:'Vaqtincha to‘xtatilgan', terminated:'Tugatilgan' };
+function normalizeCompanyStatusValue(v){
+  const s=String(v||'').toLowerCase().trim();
+  if(['terminated','tugatilgan','closed','liquidated'].includes(s)) return 'terminated';
+  if(['paused','inactive','stopped','toxtatilgan','to‘xtatilgan','vaqtincha'].includes(s)) return 'paused';
+  return 'active';
+}
+const _stage835PrevNormControlSettings = normControlSettings;
+normControlSettings = function(settings){
+  const base = _stage835PrevNormControlSettings(settings);
+  const raw = settings && typeof settings==='object' ? settings : {};
+  const statusRaw = raw.companyStatuses || raw.company_statuses || raw.companyStatus || raw.company_status || [];
+  const arr = Array.isArray(statusRaw) ? statusRaw : Object.entries(statusRaw||{}).map(([companyId,status])=>({companyId,status}));
+  const companyStatuses=[]; const seen=new Set();
+  arr.forEach(x=>{
+    if(!x||typeof x!=='object') return;
+    const companyId=String(x.companyId||x.company_id||x.id||'').trim();
+    const status=normalizeCompanyStatusValue(x.status||x.value||'active');
+    if(!companyId || status==='active' || seen.has(companyId)) return;
+    seen.add(companyId);
+    companyStatuses.push({companyId,status,note:String(x.note||'').trim(),updatedAt:String(x.updatedAt||x.updated_at||'').trim()});
+  });
+  return {...base, companyStatuses};
+};
+controlSettings = function(){ state.controlSettings=normControlSettings(state.controlSettings); return state.controlSettings; };
+function companyStatusRecord(companyId){ return (controlSettings().companyStatuses||[]).find(x=>x.companyId===companyId)||null; }
+function companyStatus(c){ if(!c) return 'active'; const rec=companyStatusRecord(c.id); if(rec?.status==='terminated') return 'terminated'; if(c.isActive===false) return 'paused'; return 'active'; }
+function companyStatusLabel(c){ return COMPANY_STATUS_LABELS[companyStatus(c)] || 'Faol'; }
+function companyStatusBadge(c){ const st=companyStatus(c); return `<span class="badge ${st==='terminated'?'terminated':st==='paused'?'paused':'green'}">${escapeHtml(companyStatusLabel(c))}</span>`; }
+function companySortWeight(c){ const st=companyStatus(c); return st==='active'?0:(st==='paused'?1:2); }
+function sortCompaniesForLists(rows){ return (rows||[]).slice().sort((a,b)=>companySortWeight(a)-companySortWeight(b)||String(a.name||'').localeCompare(String(b.name||''),'uz')); }
+activeCompanies = function(){ return sortCompaniesForLists(state.companies.filter(c => companyStatus(c)==='active')); };
+async function saveCompanyStatusSetting(companyId,status){
+  const normalized=normalizeCompanyStatusValue(status);
+  const settings=controlSettings();
+  const now=new Date().toISOString();
+  const rows=(settings.companyStatuses||[]).filter(x=>x.companyId!==companyId);
+  if(normalized!=='active') rows.push({companyId,status:normalized,updatedAt:now});
+  const newSettings={...settings,companyStatuses:rows,updatedAt:now};
+  const r=await api('/api/control-settings',{method:'PUT',body:JSON.stringify({settings:newSettings})});
+  state.controlSettings=r.data||newSettings; saveBootstrapCache();
+}
+function companyStatusSelect(id,c){ const st=companyStatus(c); return `<select id="${id}"><option value="active" ${st==='active'?'selected':''}>Faol</option><option value="paused" ${st==='paused'?'selected':''}>Vaqtincha to‘xtatilgan</option><option value="terminated" ${st==='terminated'?'selected':''}>Tugatilgan</option></select>`; }
+openCompanyModal = function(id=null){
+  editingCompanyId = id; const c = id ? byId(state.companies,id) : {tin:'',name:'',address:'',oked:'',director:'',isActive:true};
+  showModal(id?'Korxonani tahrirlash':'Korxona qo‘shish', `<div class="form-grid"><div><label>STIR / INN</label><input id="c_tin" value="${escapeHtml(c.tin)}" maxlength="9" oninput="this.value=this.value.replace(/\D/g,'').slice(0,9)"></div><div style="display:flex;align-items:end"><button class="btn secondary" style="width:100%" onclick="lookupCompanyByTin()">Ochiq manbadan nomini olish</button></div><div class="full"><label>Korxona nomi</label><input id="c_name" value="${escapeHtml(c.name)}"></div><div class="full"><label>Manzil qo‘lda kiritiladi</label><input id="c_address" value="${escapeHtml(c.address)}"></div><div><label>OKED</label><input id="c_oked" value="${escapeHtml(c.oked)}"></div><div><label>Rahbar</label><input id="c_director" value="${escapeHtml(c.director)}"></div><div><label>Status</label>${companyStatusSelect('c_status', c)}<span class="company-status-caption">“Tugatilgan” korxonalar ro‘yxatning eng oxiriga tushadi va alohida rangda chiqadi.</span></div></div><div class="actions">${id?'<button class="btn danger" onclick="deleteCompany()">O‘chirish</button>':''}<button class="btn ghost" onclick="closeModal()">Bekor qilish</button><button class="btn" onclick="saveCompany()">Saqlash</button></div>`);
+};
+saveCompany = async function(){
+  try{
+    const st=$('c_status')?.value||'active';
+    const payload={tin:$('c_tin').value,name:$('c_name').value,address:$('c_address').value,oked:$('c_oked').value,director:$('c_director').value,isActive:st==='active'};
+    const r=await api(editingCompanyId?'/api/companies/'+editingCompanyId:'/api/companies',{method:editingCompanyId?'PUT':'POST',body:JSON.stringify(payload)});
+    const savedId=editingCompanyId || r?.data?.id;
+    if(savedId) await saveCompanyStatusSetting(savedId, st);
+    await loadData(); closeModal(); render();
+  }catch(err){ alert(err.message); }
+};
+controlVisibleBaseCompanies = function(){ const selected=controlSelectedCompanyIds(); const pool=activeCompanies(); if(!selected.length) return pool; const set=new Set(selected); return pool.filter(c=>set.has(c.id)); };
+controlVisibleCompanies = function(){ const q=String(controlCompanyFilter||'').toLowerCase().trim(); const arr=controlVisibleBaseCompanies(); if(!q) return arr; return arr.filter(c=>String(c.name||'').toLowerCase().includes(q) || String(c.tin||'').includes(q)); };
+renderControlCompanySettingsList = function(){ const box=$('controlCompanySettingsList'); if(!box) return; const q=String(controlCompanySettingsSearch||'').toLowerCase().trim(); const rows=activeCompanies().filter(c=>!q||String(c.name||'').toLowerCase().includes(q)||String(c.tin||'').includes(q)); box.innerHTML=rows.map(c=>`<label class="control-company-check-card"><input type="checkbox" ${controlCompanySelectionDraft.has(c.id)?'checked':''} onchange="toggleControlCompanyDraft('${c.id}',this.checked)"><span><b>${escapeHtml(c.name)}</b><span>STIR: ${escapeHtml(c.tin||'-')}</span></span></label>`).join('') || '<div class="empty">Faol korxona topilmadi.</div>'; };
+selectAllControlCompaniesDraft = function(flag){ controlCompanySelectionDraft = flag ? new Set(activeCompanies().map(c=>c.id)) : new Set(); renderControlCompanySettingsList(); };
+companiesTable = function(){
+  const q = String(listFilters.companySearch || '').toLowerCase().trim();
+  let rows = sortCompaniesForLists(state.companies);
+  if(q) rows = rows.filter(c => String((c.name||'')+' '+(c.tin||'')+' '+(c.address||'')+' '+companyStatusLabel(c)).toLowerCase().includes(q));
+  const page = paginateRows(rows, 'companies');
+  const pageIds = page.rows.map(c=>c.id);
+  return `<div class="toolbar"><div class="search-box"><input id="companySearch" placeholder="Korxona nomi, STIR, status yoki manzilni kiriting..." value="${escapeHtml(listFilters.companySearch)}" onkeydown="if(event.key==='Enter'){event.preventDefault();applyCompanySearch();}"><button class="btn secondary small" onclick="applyCompanySearch()">Qidirish</button><button class="btn ghost small" onclick="clearCompanySearch()">Tozalash</button></div><span class="filter-note">${listFilters.companySearch ? 'Qidiruv: '+escapeHtml(listFilters.companySearch) : 'Faol → to‘xtatilgan → tugatilgan tartibida'}</span><button class="btn secondary small" onclick='toggleCompaniesByIds(${JSON.stringify(pageIds)},true)'>Joriy sahifadagilarni belgilash</button><button class="btn ghost small" onclick='toggleCompaniesByIds(${JSON.stringify(pageIds)},false)'>Joriy sahifa belgisini olib tashlash</button><button class="btn small" onclick="openBulkTaskForSelected()">Belgilanganlarga topshiriq (${presetCompanyIds.length})</button></div><div class="hint" style="margin-top:0;margin-bottom:14px">Statusi vaqtincha to‘xtatilgan korxonalar avtomatik oxirroqqa, “Tugatilgan” statusdagilar esa eng oxirga tushadi.</div>${!rows.length?'<div class="empty">Qidiruv bo‘yicha korxona topilmadi.</div>':`<div class="table-wrap"><table id="companiesTable"><thead><tr><th><input class="row-check" type="checkbox" onchange='toggleCompaniesByIds(${JSON.stringify(pageIds)},this.checked)'></th><th>Korxona</th><th>STIR</th><th>Manzil</th><th>Status</th><th>Jami</th><th>Bajarildi</th><th>Jarayonda</th><th>Kechikkan</th><th>Foiz</th><th>Amal</th></tr></thead><tbody>${page.rows.map(c=>{const s=companyStats(c.id); const st=companyStatus(c); return `<tr class="company-status-${st}"><td><input class="row-check" name="companyRowSelect" type="checkbox" value="${c.id}" ${presetCompanyIds.includes(c.id)?'checked':''} ${st!=='active'?'disabled title="Faol bo‘lmagan korxonaga ommaviy topshiriq berilmaydi"':''} onchange="toggleCompanySelection('${c.id}',this.checked)"></td><td><span class="company-link ${st==='terminated'?'terminated':''}" onclick="openCompany('${c.id}')">${escapeHtml(c.name)}</span>${st==='terminated'?'<span class="company-status-caption">Tugatilgan korxona</span>':''}</td><td>${escapeHtml(c.tin)}</td><td>${escapeHtml(c.address||'-')}</td><td>${companyStatusBadge(c)}</td><td>${s.total}</td><td>${s.done}</td><td>${s.progress}</td><td><span class="badge ${s.overdue?'red':'green'}">${s.overdue}</span></td><td><div style="display:flex;gap:8px;align-items:center"><div class="progress"><span style="width:${s.percent}%"></span></div><b>${s.percent}%</b></div></td><td><button class="btn secondary small" onclick="openCompanyModal('${c.id}')">Tahrirlash</button></td></tr>`}).join('')}</tbody></table></div>${paginationHtml(page,'companies')}`}`;
+};
+
 </script>
 </body>
 </html>
