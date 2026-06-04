@@ -1,43 +1,67 @@
-# Stage 8.3.3 — Nazorat jadvali: “Topshirish zarur emas” yakuniy fix
+# Korxonalar bo‘yicha topshiriqlar va ijro nazorati tizimi — Stage 8.3.4
 
-Ushbu paket Stage 8.3.2 asosida tayyorlandi. Hozirgi Supabase baza o‘chirilmaydi, yangi jadval/ustun/migration qo‘shilmaydi.
+Ushbu paket Stage 8.3.3 asosida tayyorlangan qo‘shimcha fix hisoblanadi.
 
-## Qo‘shilgan va tuzatilgan funksiyalar
+## Muhim shart
 
-1. **“Topshirish zarur emas” bosilganda xodim biriktirilmaydi**
-   - Nazorat jadvalidagi katakdan “Topshirish zarur emas” tanlansa, topshiriq `assignee_id = null` bilan saqlanadi.
-   - Bunday topshiriq xodimga yuborilmaydi.
+- Hozirgi Supabase baza o‘chirilmaydi.
+- Yangi jadval qo‘shilmaydi.
+- Yangi ustun qo‘shilmaydi.
+- Migration kerak emas.
+- Tilda iframe tartibi saqlanadi.
 
-2. **Xodim izohi direktor ko‘rishi uchun ajratildi**
-   - Xodim nazorat topshirig‘i izohiga “Topshirish zarur emas” deb yozsa, tizim uni direktor jadvalida alohida holat sifatida ko‘rsatadi.
-   - Jadvaldagi katak “Xodim: topshirish zarur emas” holatini ko‘rsatadi.
+## Stage 8.3.4 da kiritilgan o‘zgarishlar
 
-3. **Topshirish zarur bo‘lmagan kataklar boshqacha ko‘rinadi**
-   - Bunday kataklar maxsus kulrang chiziqli ko‘rinishda chiqadi.
-   - Xodim tomonidan yozilgan holat sariq-kulrang ogohlantirish ko‘rinishida ajratiladi.
+### 1. 1000 tadan keyingi topshiriqlar soni to‘g‘rilandi
 
-4. **Korxona + band bo‘yicha doimiy “zarur emas” qoidasi saqlandi**
-   - Masalan, bir korxonada NDS topshirish zarur bo‘lmasa, bu holat Supabase Storage JSON sozlamasida saqlanadi.
-   - Keyingi oy jadval ochilganda shu korxona va band avtomatik “Topshirish zarur emas” bo‘lib ko‘rinadi.
-   - Database schema o‘zgarmaydi.
+Supabase `select()` so‘rovlari default holatda 1000 qator bilan cheklanib qolishi mumkin edi. Endi backend topshiriqlarni, korxonalarni, foydalanuvchilarni va ilova flaglarini page-by-page tortadi.
 
-5. **“Zarur qilib qaytarish” tugmasi qo‘shildi**
-   - Rahbar oldin saqlangan “Topshirish zarur emas” qoidasini bekor qila oladi.
-   - Kerak bo‘lsa o‘sha katak yana oddiy topshiriq sifatida ishlatiladi.
+Natija:
 
-## Saqlash mexanizmi
+- 1000 tadan keyin ham topshiriqlar soni to‘g‘ri ko‘rinadi;
+- menu hisoblagichlari to‘g‘ri ishlaydi;
+- dashboard va hisobotlarda umumiy sonlar to‘g‘ri hisoblanadi;
+- reminder/digest hisob-kitoblarida ham 1000 limitga tushib qolmaydi.
 
-Quyidagi Storage JSON ishlatiladi:
+Qo‘shimcha ENV majburiy emas. Zarurat bo‘lsa:
 
 ```text
-CONTROL_SETTINGS_PATH=control-board/stage8_3_settings.json
+SUPABASE_FETCH_PAGE_SIZE=1000
+SUPABASE_FETCH_MAX_ROWS=50000
 ```
 
-Ichida `companyIds` bilan birga `notRequiredItems` ham saqlanadi. Bu yangi jadval yoki ustun emas.
+### 2. Topshiriqlar ro‘yxatida page size kengaytirildi
 
-## Deploy
+Topshiriqlar ro‘yxatida har sahifadagi qatorlar soni tanlanadi:
 
-Repo’da quyidagi fayllarni almashtiring:
+```text
+10 / 50 / 100 / 1000 / 2000 / 5000
+```
+
+Tanlangan qiymat browser `localStorage` da saqlanadi.
+
+### 3. Bajarilmagan yoki muammoli topshiriqlarni guruhlab o‘chirish
+
+Rahbar uchun topshiriqlar ro‘yxatida quyidagi imkoniyatlar qo‘shildi:
+
+- joriy sahifadagi muammoli topshiriqlarni belgilash;
+- belgilangan topshiriqlarni guruhlab o‘chirish;
+- belgilarni tozalash.
+
+O‘chirish faqat quyidagi muammoli holatlarga qo‘llanadi:
+
+```text
+Bajarilmadi
+Bekor qilindi
+Qayta ishlashga qaytarildi
+Muddati o‘tgan topshiriqlar
+```
+
+Bajarilgan yoki direktor tasdiqlagan topshiriqlar tasodifan belgilanib qolsa ham backend ularni o‘chirmaydi.
+
+## Deploy tartibi
+
+Backend repo’da quyidagi fayllarni almashtiring:
 
 ```text
 server.js
@@ -46,10 +70,22 @@ README.md
 public/ijro-nazorati.html
 ```
 
-Keyin GitHub’ga push qiling va Render’da:
+Keyin:
 
 ```text
-Manual Deploy → Deploy latest commit
+GitHub commit/push
+Render → Manual Deploy → Deploy latest commit
 ```
 
-Tilda iframe allaqachon qo‘yilgan bo‘lsa, Tilda’ga tegmang.
+Agar Tilda’da iframe allaqachon qo‘yilgan bo‘lsa, Tilda’ga tegmang.
+
+## Tekshiruv
+
+Deploydan keyin:
+
+```text
+/health
+/app
+```
+
+Sahifani `Ctrl + F5` bilan yangilang.
