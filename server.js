@@ -144,9 +144,27 @@ function normalizeControlSettings(settings) {
     seen.add(key);
     uniqueRules.push(rule);
   }
+  const statusRaw = raw.companyStatuses || raw.company_statuses || raw.companyStatus || raw.company_status || {};
+  const statusItems = Array.isArray(statusRaw)
+    ? statusRaw
+    : Object.entries(statusRaw || {}).map(([companyId, status]) => ({ companyId, status }));
+  const companyStatuses = [];
+  const seenStatus = new Set();
+  for (const item of statusItems) {
+    if (!item || typeof item !== 'object') continue;
+    const companyId = cleanText(item.companyId || item.company_id || item.id || '');
+    let status = cleanText(item.status || item.value || '').toLowerCase();
+    if (['tugatilgan','terminated','closed','liquidated'].includes(status)) status = 'terminated';
+    else if (['paused','inactive','stopped','toxtatilgan','to‘xtatilgan','vaqtincha'].includes(status)) status = 'paused';
+    else status = 'active';
+    if (!companyId || status === 'active' || seenStatus.has(companyId)) continue;
+    seenStatus.add(companyId);
+    companyStatuses.push({ companyId, status, note: cleanText(item.note || ''), updatedAt: cleanText(item.updatedAt || item.updated_at || '') });
+  }
   return {
     companyIds: [...new Set(companyIds)],
     notRequiredItems: uniqueRules,
+    companyStatuses,
     updatedAt: cleanText(raw.updatedAt || raw.updated_at || '')
   };
 }
@@ -170,7 +188,7 @@ async function writeControlSettings(settings) {
   ensureDb();
   const normalized = normalizeControlSettings(settings);
   normalized.updatedAt = new Date().toISOString();
-  const payload = JSON.stringify({ version: '8.3.3', updatedAt: normalized.updatedAt, settings: normalized }, null, 2);
+  const payload = JSON.stringify({ version: '8.3.5', updatedAt: normalized.updatedAt, settings: normalized }, null, 2);
   const { error } = await supabase.storage.from(ATTACHMENTS_BUCKET).upload(CONTROL_SETTINGS_PATH, Buffer.from(payload, 'utf8'), {
     contentType: 'application/json; charset=utf-8',
     upsert: true
@@ -922,6 +940,32 @@ async function notifyDirectorsTaskStatusChanged(task, oldStatus) {
   }
 }
 
+async function notifyAssigneeTaskFailed(task, oldStatus = '') {
+  try {
+    if (process.env.EMPLOYEE_FAILED_NOTIFY_ENABLED === 'false') return;
+    if (!task || task.status !== 'Bajarilmadi') return;
+    const [company, assignee] = await Promise.all([
+      getById('companies', task.company_id).catch(() => null),
+      getById('app_users', task.assignee_id).catch(() => null)
+    ]);
+    if (!assignee?.telegram_chat_id) return;
+    const text = [
+      '⚠️ Topshiriq bajarilmagan deb belgilandi',
+      '',
+      `Korxona: ${company?.name || '-'}`,
+      `Topshiriq: ${task.title || '-'}`,
+      oldStatus ? `Oldingi holat: ${oldStatus}` : '',
+      `Yangi holat: ${task.status}`,
+      `Muddat: ${taskDeadlineTextServer(task) || '-'}`,
+      task.director_note ? `Direktor izohi: ${task.director_note}` : '',
+      task.employee_note ? `Xodim izohi: ${task.employee_note}` : ''
+    ].filter(Boolean).join('\n');
+    await sendTelegramMessage(assignee.telegram_chat_id, text);
+  } catch (err) {
+    console.warn('Employee failed task telegram failed:', err.message);
+  }
+}
+
 async function addTaskHistory(taskId, userId, action, oldStatus, newStatus, note) {
   try {
     await supabase.from('task_history').insert({
@@ -1330,6 +1374,7 @@ app.put('/api/tasks/:id', async (req, res) => {
     if (payload.status && payload.status !== oldTask.status) {
       await addTaskHistory(data.id, actorId, 'Status o‘zgardi', oldTask.status, data.status, data.employee_note || data.director_note || '');
       await notifyDirectorsTaskStatusChanged(data, oldTask.status);
+      if (data.status === 'Bajarilmadi' && oldTask.status !== 'Bajarilmadi') notifyAssigneeTaskFailed(data, oldTask.status).catch(err => console.warn('Employee failed notify async failed:', err.message));
       if (data.status === 'Direktor tasdiqladi' && oldTask.status !== 'Direktor tasdiqladi' && customerDoneNotifyRequested(req.body)) notifyCustomerTaskDone(data).catch(err => console.warn('Customer done notify async failed:', err.message));
     } else {
       await addTaskHistory(data.id, actorId, 'Topshiriq tahrirlandi', oldTask.status, data.status, data.employee_note || data.director_note || '');
@@ -1985,6 +2030,7 @@ function taskDoneCustomerText(task, company = {}, assignee = {}) {
     `Topshiriq: ${task.title || '-'}`,
     `Mas’ul: ${assignee.full_name || '-'}`,
     `Muddat: ${taskDeadlineTextServer(task) || '-'}`,
+    task.employee_note ? `Xodim izohi: ${task.employee_note}` : '',
     `Tasdiq vaqti: ${new Date().toLocaleString('uz-UZ')}`,
     '',
     'Rahmat. Topshiriq ijrosi tizimda yakunlandi.'
