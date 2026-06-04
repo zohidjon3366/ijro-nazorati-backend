@@ -429,6 +429,42 @@ async function makePasswordHash(password) {
   return bcrypt.hash(String(password || ''), 10);
 }
 
+
+
+// Stage 8.3.4 — Supabase default 1000 row limit bypass.
+// Supabase select() returns 1000 rows by default; this helper loads data page-by-page
+// without changing the database schema.
+const SUPABASE_FETCH_PAGE_SIZE = Math.min(1000, Math.max(100, Number(process.env.SUPABASE_FETCH_PAGE_SIZE || 1000)));
+const SUPABASE_FETCH_MAX_ROWS = Math.max(1000, Number(process.env.SUPABASE_FETCH_MAX_ROWS || 50000));
+
+async function fetchAllRows(table, select = '*', options = {}) {
+  ensureDb();
+  const pageSize = SUPABASE_FETCH_PAGE_SIZE;
+  const maxRows = SUPABASE_FETCH_MAX_ROWS;
+  const rows = [];
+  for (let from = 0; from < maxRows; from += pageSize) {
+    let query = supabase.from(table).select(select);
+    const filters = Array.isArray(options.eq) ? options.eq : [];
+    for (const [column, value] of filters) query = query.eq(column, value);
+    if (options.order) query = query.order(options.order.column, { ascending: options.order.ascending !== false });
+    query = query.range(from, from + pageSize - 1);
+    const { data, error } = await query;
+    if (error) throw error;
+    const part = data || [];
+    rows.push(...part);
+    if (part.length < pageSize) break;
+  }
+  return rows;
+}
+
+async function fetchAllRowsResult(table, select = '*', options = {}) {
+  try {
+    return { data: await fetchAllRows(table, select, options), error: null };
+  } catch (error) {
+    return { data: [], error };
+  }
+}
+
 async function getBootstrapData() {
   ensureDb();
   let controlItems = normalizeControlItems(DEFAULT_CONTROL_ITEMS);
@@ -436,11 +472,11 @@ async function getBootstrapData() {
   try { controlItems = await readControlItems(); } catch (err) { console.warn('Control items fallback:', err.message); }
   try { controlSettings = await readControlSettings(); } catch (err) { console.warn('Control settings fallback:', err.message); }
   const [usersRes, companiesRes, templatesRes, tasksRes, attachmentsRes] = await Promise.all([
-    supabase.from('app_users').select('*').order('created_at', { ascending: true }),
-    supabase.from('companies').select('*').order('created_at', { ascending: true }),
-    supabase.from('task_templates').select('*').order('created_at', { ascending: true }),
-    supabase.from('tasks').select('*').order('created_at', { ascending: false }),
-    supabase.from('task_attachments').select('task_id,file_name,file_type')
+    fetchAllRowsResult('app_users', '*', { order: { column: 'created_at', ascending: true } }),
+    fetchAllRowsResult('companies', '*', { order: { column: 'created_at', ascending: true } }),
+    fetchAllRowsResult('task_templates', '*', { order: { column: 'created_at', ascending: true } }),
+    fetchAllRowsResult('tasks', '*', { order: { column: 'created_at', ascending: false } }),
+    fetchAllRowsResult('task_attachments', 'task_id,file_name,file_type')
   ]);
   for (const r of [usersRes, companiesRes, templatesRes, tasksRes]) if (r.error) throw r.error;
   if (attachmentsRes.error) console.warn('Audio flags load failed:', attachmentsRes.error.message);
@@ -1408,6 +1444,60 @@ app.delete('/api/tasks/:id', async (req, res) => {
 });
 
 
+app.post('/api/tasks/bulk-delete', async (req, res) => {
+  try {
+    ensureDb();
+    const rawIds = Array.isArray(req.body.ids) ? req.body.ids : [];
+    const ids = [...new Set(rawIds.map(id => cleanText(id)).filter(Boolean))];
+    if (!ids.length) return res.status(400).json({ ok: false, error: 'O‘chirish uchun topshiriqlar belgilanmagan' });
+    if (ids.length > Number(process.env.BULK_DELETE_MAX_TASKS || 5000)) {
+      return res.status(400).json({ ok: false, error: 'Bir martada juda ko‘p topshiriq tanlangan' });
+    }
+
+    const rows = [];
+    for (let i = 0; i < ids.length; i += 500) {
+      const part = ids.slice(i, i + 500);
+      const { data, error } = await supabase.from('tasks').select('*').in('id', part);
+      if (error) throw error;
+      rows.push(...(data || []));
+    }
+
+    const onlyProblem = req.body.onlyProblem !== false;
+    const deletable = onlyProblem
+      ? rows.filter(t => ['Bajarilmadi', 'Bekor qilindi', 'Qayta ishlashga qaytarildi'].includes(t.status) || isTaskOverdueServer(t))
+      : rows;
+    const deleteIds = deletable.map(t => t.id);
+    if (!deleteIds.length) return res.json({ ok: true, deleted: 0, skipped: ids.length, message: 'Tanlanganlar ichida bajarilmagan yoki muammoli topshiriq topilmadi' });
+
+    const attachments = [];
+    for (let i = 0; i < deleteIds.length; i += 500) {
+      const part = deleteIds.slice(i, i + 500);
+      const { data, error } = await supabase.from('task_attachments').select('id,task_id,file_path').in('task_id', part);
+      if (error) throw error;
+      attachments.push(...(data || []));
+    }
+    const storagePaths = attachments.map(a => a.file_path).filter(Boolean);
+    for (let i = 0; i < storagePaths.length; i += 100) {
+      const part = storagePaths.slice(i, i + 100);
+      const { error } = await supabase.storage.from(ATTACHMENTS_BUCKET).remove(part);
+      if (error) console.warn('Bulk attachment storage remove failed:', error.message);
+    }
+
+    for (let i = 0; i < deleteIds.length; i += 500) {
+      const part = deleteIds.slice(i, i + 500);
+      await supabase.from('task_history').delete().in('task_id', part);
+      await supabase.from('task_attachments').delete().in('task_id', part);
+      const { error } = await supabase.from('tasks').delete().in('id', part);
+      if (error) throw error;
+    }
+
+    return res.json({ ok: true, deleted: deleteIds.length, skipped: ids.length - deleteIds.length });
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+
+
 app.get('/api/tasks/:id/attachments', async (req, res) => {
   try {
     ensureDb();
@@ -1513,9 +1603,9 @@ app.get('/api/reports/tasks.csv', async (req, res) => {
   try {
     ensureDb();
     const [tasksRes, companiesRes, usersRes] = await Promise.all([
-      supabase.from('tasks').select('*').order('created_at', { ascending: false }),
-      supabase.from('companies').select('*'),
-      supabase.from('app_users').select('*')
+      fetchAllRowsResult('tasks', '*', { order: { column: 'created_at', ascending: false } }),
+      fetchAllRowsResult('companies', '*'),
+      fetchAllRowsResult('app_users', '*')
     ]);
     for (const r of [tasksRes, companiesRes, usersRes]) if (r.error) throw r.error;
 
@@ -1582,9 +1672,9 @@ function taskDeadlineTextServer(task) {
 async function getReportRowsFromDb(q = {}) {
   ensureDb();
   const [tasksRes, companiesRes, usersRes] = await Promise.all([
-    supabase.from('tasks').select('*').order('created_at', { ascending: false }),
-    supabase.from('companies').select('*'),
-    supabase.from('app_users').select('*')
+    fetchAllRowsResult('tasks', '*', { order: { column: 'created_at', ascending: false } }),
+    fetchAllRowsResult('companies', '*'),
+    fetchAllRowsResult('app_users', '*')
   ]);
   for (const r of [tasksRes, companiesRes, usersRes]) if (r.error) throw r.error;
   const companies = new Map((companiesRes.data || []).map(c => [c.id, c]));
@@ -1774,8 +1864,8 @@ async function checkAndSendScheduledDigest() {
   const cacheKey = `digest|${matched.dateIso}|${matched.hm}`;
   if (reminderSentKeys.has(cacheKey)) return { sent: 0, mode: 'scheduled', duplicate: true };
   const [tasksRes, companiesRes] = await Promise.all([
-    supabase.from('tasks').select('*').eq('is_active', true),
-    supabase.from('companies').select('*')
+    fetchAllRowsResult('tasks', '*', { eq: [['is_active', true]] }),
+    fetchAllRowsResult('companies', '*')
   ]);
   for (const r of [tasksRes, companiesRes]) if (r.error) throw r.error;
   const companies = new Map((companiesRes.data || []).map(c => [c.id, c]));
@@ -1797,7 +1887,7 @@ async function checkAndSendWeeklyDigest(preloadedTasks = null, preloadedCompanie
   let tasks = preloadedTasks;
   let companies = preloadedCompanies;
   if (!tasks || !companies) {
-    const [tasksRes, companiesRes] = await Promise.all([supabase.from('tasks').select('*').eq('is_active', true), supabase.from('companies').select('*')]);
+    const [tasksRes, companiesRes] = await Promise.all([fetchAllRowsResult('tasks', '*', { eq: [['is_active', true]] }), fetchAllRowsResult('companies', '*')]);
     for (const r of [tasksRes, companiesRes]) if (r.error) throw r.error;
     tasks = tasksRes.data || [];
     companies = new Map((companiesRes.data || []).map(c => [c.id, c]));
@@ -1815,9 +1905,9 @@ async function checkAndSendThresholdReminders() {
   ensureDb();
   cleanupReminderCache();
   const [tasksRes, companiesRes, usersRes, directorsRes] = await Promise.all([
-    supabase.from('tasks').select('*').eq('is_active', true),
-    supabase.from('companies').select('*'),
-    supabase.from('app_users').select('*'),
+    fetchAllRowsResult('tasks', '*', { eq: [['is_active', true]] }),
+    fetchAllRowsResult('companies', '*'),
+    fetchAllRowsResult('app_users', '*'),
     supabase.from('app_users').select('*').eq('role', 'director').eq('is_active', true).not('telegram_chat_id', 'is', null)
   ]);
   for (const r of [tasksRes, companiesRes, usersRes, directorsRes]) if (r.error) throw r.error;
