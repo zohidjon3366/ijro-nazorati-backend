@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: all-finance
+    runtime: node
+    buildCommand: npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: DATA_DIR
+        value: /var/data/allfinance
+      - key: ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: all-finance-data
+      mountPath: /var/data/allfinance
+      sizeGB: 1

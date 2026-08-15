@@ -1,0 +1,54 @@
+{
+  "updatedAt": "2026-08-15T00:00:00.000Z",
+  "uz": {
+    "info": [
+      {"title":"Bazaviy hisoblash miqdori","value":"412 000 so‘m","note":"01.08.2025 dan"},
+      {"title":"Mehnatga haq to‘lashning eng kam miqdori","value":"1 271 000 so‘m","note":"01.08.2025 dan"},
+      {"title":"Markaziy bank asosiy stavkasi","value":"14%","note":"Amaldagi ko‘rsatkich"}
+    ],
+    "calendar": [
+      {"date":"2026-07-15","category":"Hisobot","title":"Aylanmadan olinadigan soliq hisoboti","detail":"Iyun oyi uchun hisobotni taqdim etish muddati."},
+      {"date":"2026-07-20","category":"Hisobot va to‘lov","title":"QQS hisoboti va to‘lovi","detail":"Iyun oyi bo‘yicha QQS hisobotini taqdim etish va to‘lash."},
+      {"date":"2026-07-25","category":"To‘lov","title":"Mol-mulk va yer solig‘i","detail":"Joriy to‘lovlar bo‘yicha nazorat muddati."}
+    ],
+    "workdays": [
+      {"month":"Yanvar","fiveDay":"20","sixDay":"25","hours":"160 / 200"},{"month":"Fevral","fiveDay":"20","sixDay":"24","hours":"160 / 192"},{"month":"Mart","fiveDay":"21","sixDay":"26","hours":"168 / 208"},{"month":"Aprel","fiveDay":"22","sixDay":"26","hours":"176 / 208"},{"month":"May","fiveDay":"20","sixDay":"25","hours":"160 / 200"},{"month":"Iyun","fiveDay":"22","sixDay":"26","hours":"176 / 208"}
+    ],
+    "rent": [
+      {"region":"Toshkent shahri — 1-zona","residential":"48 000 so‘m/m²/oy","nonresidential":"102 000 so‘m/m²/oy"},{"region":"Toshkent shahri — 2-zona","residential":"36 000 so‘m/m²/oy","nonresidential":"78 000 so‘m/m²/oy"},{"region":"Viloyat markazlari","residential":"18 000 so‘m/m²/oy","nonresidential":"42 000 so‘m/m²/oy"}
+    ],
+    "laws": [
+      {"icon":"§","title":"Soliq kodeksi","detail":"O‘zbekiston Respublikasi Soliq kodeksining amaldagi tahriri.","url":"https://lex.uz","label":"Lex.uz"},
+      {"icon":"§","title":"Buxgalteriya hisobi to‘g‘risida","detail":"Buxgalteriya hisobini tashkil etishning huquqiy asoslari.","url":"https://lex.uz","label":"Lex.uz"}
+    ],
+    "links": [
+      {"icon":"↗","title":"Soliq qo‘mitasi","detail":"Elektron soliq xizmatlari va shaxsiy kabinet.","url":"https://my.soliq.uz","label":"my.soliq.uz"},
+      {"icon":"↗","title":"Lex.uz","detail":"O‘zbekiston qonunchilik maʼlumotlari milliy bazasi.","url":"https://lex.uz","label":"lex.uz"},
+      {"icon":"↗","title":"Statistika agentligi","detail":"Rasmiy statistika va elektron hisobotlar.","url":"https://stat.uz","label":"stat.uz"}
+    ]
+  },
+  "ru": {
+    "info": [{"title":"Базовая расчётная величина","value":"412 000 сум","note":"с 01.08.2025"},{"title":"Минимальный размер оплаты труда","value":"1 271 000 сум","note":"с 01.08.2025"},{"title":"Основная ставка Центрального банка","value":"14%","note":"Текущее значение"}],
+    "calendar": [{"date":"15.07.2026","category":"Отчёт","title":"Отчёт по налогу с оборота","detail":"Срок сдачи отчёта за июнь."},{"date":"20.07.2026","category":"Отчёт и платёж","title":"Отчёт и уплата НДС","detail":"Сдача отчёта и уплата НДС за июнь."},{"date":"25.07.2026","category":"Платёж","title":"Налог на имущество и землю","detail":"Контрольный срок текущих платежей."}],
+    "workdays": [{"month":"Январь","fiveDay":"20","sixDay":"25","hours":"160 / 200"},{"month":"Февраль","fiveDay":"20","sixDay":"24","hours":"160 / 192"},{"month":"Март","fiveDay":"21","sixDay":"26","hours":"168 / 208"},{"month":"Апрель","fiveDay":"22","sixDay":"26","hours":"176 / 208"}],
+    "rent": [{"region":"г. Ташкент — зона 1","residential":"48 000 сум/м²/мес.","nonresidential":"102 000 сум/м²/мес."},{"region":"г. Ташкент — зона 2","residential":"36 000 сум/м²/мес.","nonresidential":"78 000 сум/м²/мес."},{"region":"Областные центры","residential":"18 000 сум/м²/мес.","nonresidential":"42 000 сум/м²/мес."}],
+    "laws": [{"icon":"§","title":"Налоговый кодекс","detail":"Действующая редакция Налогового кодекса Республики Узбекистан.","url":"https://lex.uz/ru","label":"Lex.uz"},{"icon":"§","title":"О бухгалтерском учёте","detail":"Правовые основы организации бухгалтерского учёта.","url":"https://lex.uz/ru","label":"Lex.uz"}],
+    "links": [{"icon":"↗","title":"Налоговый комитет","detail":"Электронные налоговые услуги и личный кабинет.","url":"https://my.soliq.uz","label":"my.soliq.uz"},{"icon":"↗","title":"Lex.uz","detail":"Национальная база законодательства Узбекистана.","url":"https://lex.uz/ru","label":"lex.uz"}]
+  },
+  "en": {
+    "info": [{"title":"Basic calculation amount","value":"UZS 412,000","note":"from 1 Aug 2025"},{"title":"Minimum wage","value":"UZS 1,271,000","note":"from 1 Aug 2025"},{"title":"Central Bank policy rate","value":"14%","note":"Current rate"}],
+    "calendar": [{"date":"15 Jul 2026","category":"Report","title":"Turnover tax return","detail":"Deadline for the June return."},{"date":"20 Jul 2026","category":"Report and payment","title":"VAT return and payment","detail":"Submit and pay VAT for June."},{"date":"25 Jul 2026","category":"Payment","title":"Property and land tax","detail":"Control date for current payments."}],
+    "workdays": [{"month":"January","fiveDay":"20","sixDay":"25","hours":"160 / 200"},{"month":"February","fiveDay":"20","sixDay":"24","hours":"160 / 192"},{"month":"March","fiveDay":"21","sixDay":"26","hours":"168 / 208"},{"month":"April","fiveDay":"22","sixDay":"26","hours":"176 / 208"}],
+    "rent": [{"region":"Tashkent — zone 1","residential":"UZS 48,000/m²/month","nonresidential":"UZS 102,000/m²/month"},{"region":"Tashkent — zone 2","residential":"UZS 36,000/m²/month","nonresidential":"UZS 78,000/m²/month"},{"region":"Regional centres","residential":"UZS 18,000/m²/month","nonresidential":"UZS 42,000/m²/month"}],
+    "laws": [{"icon":"§","title":"Tax Code","detail":"Current Tax Code of the Republic of Uzbekistan.","url":"https://lex.uz","label":"Lex.uz"},{"icon":"§","title":"Law on Accounting","detail":"Legal framework for organizing accounting.","url":"https://lex.uz","label":"Lex.uz"}],
+    "links": [{"icon":"↗","title":"Tax Committee","detail":"Electronic tax services and personal cabinet.","url":"https://my.soliq.uz","label":"my.soliq.uz"},{"icon":"↗","title":"Lex.uz","detail":"National legislation database of Uzbekistan.","url":"https://lex.uz","label":"lex.uz"}]
+  },
+  "zh": {
+    "info": [{"title":"基本计算金额","value":"412,000 苏姆","note":"自2025年8月1日起"},{"title":"最低工资标准","value":"1,271,000 苏姆","note":"自2025年8月1日起"},{"title":"中央银行基准利率","value":"14%","note":"当前指标"}],
+    "calendar": [{"date":"2026-07-15","category":"申报","title":"营业税申报","detail":"六月申报截止日期。"},{"date":"2026-07-20","category":"申报及付款","title":"增值税申报及付款","detail":"提交六月增值税申报并付款。"},{"date":"2026-07-25","category":"付款","title":"财产税及土地税","detail":"本期付款检查日期。"}],
+    "workdays": [{"month":"一月","fiveDay":"20","sixDay":"25","hours":"160 / 200"},{"month":"二月","fiveDay":"20","sixDay":"24","hours":"160 / 192"},{"month":"三月","fiveDay":"21","sixDay":"26","hours":"168 / 208"},{"month":"四月","fiveDay":"22","sixDay":"26","hours":"176 / 208"}],
+    "rent": [{"region":"塔什干市—第1区","residential":"48,000 苏姆/平方米/月","nonresidential":"102,000 苏姆/平方米/月"},{"region":"塔什干市—第2区","residential":"36,000 苏姆/平方米/月","nonresidential":"78,000 苏姆/平方米/月"},{"region":"州府城市","residential":"18,000 苏姆/平方米/月","nonresidential":"42,000 苏姆/平方米/月"}],
+    "laws": [{"icon":"§","title":"税法","detail":"乌兹别克斯坦共和国现行税法。","url":"https://lex.uz","label":"Lex.uz"},{"icon":"§","title":"会计法","detail":"组织会计工作的法律基础。","url":"https://lex.uz","label":"Lex.uz"}],
+    "links": [{"icon":"↗","title":"税务委员会","detail":"电子税务服务和个人账户。","url":"https://my.soliq.uz","label":"my.soliq.uz"},{"icon":"↗","title":"Lex.uz","detail":"乌兹别克斯坦国家法律数据库。","url":"https://lex.uz","label":"lex.uz"}]
+  }
+}

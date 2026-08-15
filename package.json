@@ -1,19 +1,14 @@
 {
-  "name": "tilda-ijro-nazorati-backend-stage8-3-4",
-  "version": "8.3.4",
-  "type": "module",
-  "main": "server.js",
+  "name": "all-finance-v30-final",
+  "version": "30.0.0",
+  "private": true,
+  "description": "ALL FINANCE — O‘zbekiston Mustaqilligining 35 yilligiga bag‘ishlangan ko‘p tilli sayt",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "build": "node scripts/generate-pages.js && node scripts/verify-build.js",
+    "verify": "node scripts/verify-build.js",
+    "start": "node server.js"
   },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.45.4",
-    "bcryptjs": "^2.4.3",
-    "cheerio": "^1.0.0",
-    "cors": "^2.8.5",
-    "express": "^4.19.2",
-    "multer": "^1.4.5-lts.1"
-  },
-  "description": "Ijro Nazorati Stage 8.3.4: large task counter fix over 1000 rows and bulk delete for failed/problem tasks; no DB schema changes"
+  "engines": {
+    "node": ">=18"
+  }
 }

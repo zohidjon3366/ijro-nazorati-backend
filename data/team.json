@@ -1,0 +1,68 @@
+{
+  "updatedAt": "2026-08-15T00:00:00.000Z",
+  "members": [
+    {
+      "id": "zohidjon-atakulov",
+      "order": 1,
+      "active": true,
+      "image": "",
+      "name": {"uz":"Atakulov Zohidjon Voxidovich","ru":"Атакулов Зохиджон Вохидович","en":"Zohidjon Atakulov","zh":"佐希德容·阿塔库洛夫"},
+      "role": {"uz":"Korxona direktori","ru":"Директор компании","en":"Company Director","zh":"公司总经理"},
+      "detail": {"uz":"Buxgalteriyada 17 yil tajriba","ru":"17 лет опыта в бухгалтерии","en":"17 years of accounting experience","zh":"17年会计经验"}
+    },
+    {
+      "id": "asadbek-karimov",
+      "order": 2,
+      "active": true,
+      "image": "",
+      "name": {"uz":"Karimov Asadbek Dilshod o‘g‘li","ru":"Каримов Асадбек Дилшодович","en":"Asadbek Karimov","zh":"阿萨德别克·卡里莫夫"},
+      "role": {"uz":"Buxgalter","ru":"Бухгалтер","en":"Accountant","zh":"会计师"},
+      "detail": {"uz":"Moliyada 4 yil tajriba","ru":"4 года опыта в финансах","en":"4 years of finance experience","zh":"4年财务经验"}
+    },
+    {
+      "id": "abdusaid-abdurashidov",
+      "order": 3,
+      "active": true,
+      "image": "",
+      "name": {"uz":"Abdurashidov Abdusaid Abduvaxobovich","ru":"Абдурашидов Абдусаид Абдувахобович","en":"Abdusaid Abdurashidov","zh":"阿卜杜赛义德·阿卜杜拉希多夫"},
+      "role": {"uz":"Bosh mutaxassis","ru":"Главный специалист","en":"Chief Specialist","zh":"首席专家"},
+      "detail": {"uz":"Buxgalteriyada 20 yil tajriba","ru":"20 лет опыта в бухгалтерии","en":"20 years of accounting experience","zh":"20年会计经验"}
+    },
+    {
+      "id": "xotam-djurayev",
+      "order": 4,
+      "active": true,
+      "image": "",
+      "name": {"uz":"Djurayev Xotam Qaxramonovich","ru":"Джураев Хотам Кахрамонович","en":"Xotam Djurayev","zh":"霍塔姆·朱拉耶夫"},
+      "role": {"uz":"Sotuv menejeri","ru":"Менеджер по продажам","en":"Sales Manager","zh":"销售经理"},
+      "detail": {"uz":"Buxgalteriyada 6 yil, sotuvda 10 yil tajriba","ru":"6 лет в бухгалтерии, 10 лет в продажах","en":"6 years in accounting and 10 years in sales","zh":"6年会计与10年销售经验"}
+    },
+    {
+      "id": "rasul-abdurashidov",
+      "order": 5,
+      "active": true,
+      "image": "",
+      "name": {"uz":"Abdurashidov Rasul Abduvaxobovich","ru":"Абдурашидов Расул Абдувахобович","en":"Rasul Abdurashidov","zh":"拉苏尔·阿卜杜拉希多夫"},
+      "role": {"uz":"Marketolog","ru":"Маркетолог","en":"Marketing Specialist","zh":"市场专家"},
+      "detail": {"uz":"Marketingda 20 yil tajriba","ru":"20 лет опыта в маркетинге","en":"20 years of marketing experience","zh":"20年市场经验"}
+    },
+    {
+      "id": "yoqubjon-toshpolotov",
+      "order": 6,
+      "active": true,
+      "image": "",
+      "name": {"uz":"Toshpo‘lotov Yoqubjon Uchqun o‘g‘li","ru":"Тошполотов Якубжон Учкунович","en":"Yoqubjon Toshpo‘lotov","zh":"亚库布容·托什波洛托夫"},
+      "role": {"uz":"Buxgalter","ru":"Бухгалтер","en":"Accountant","zh":"会计师"},
+      "detail": {"uz":"Buxgalteriyada 2 yil, sotuvda 6 yil tajriba","ru":"2 года в бухгалтерии, 6 лет в продажах","en":"2 years in accounting and 6 years in sales","zh":"2年会计与6年销售经验"}
+    },
+    {
+      "id": "xabiba-zoxidjonova",
+      "order": 7,
+      "active": true,
+      "image": "",
+      "name": {"uz":"Zoxidjonova Xabiba Xusanboy qizi","ru":"Зохиджонова Хабиба Хусанбоевна","en":"Xabiba Zoxidjonova","zh":"哈比巴·佐希德容诺娃"},
+      "role": {"uz":"Buxgalter","ru":"Бухгалтер","en":"Accountant","zh":"会计师"},
+      "detail": {"uz":"Buxgalteriyada va ishlab chiqarishda 2 yillik tajriba","ru":"2 года опыта в бухгалтерии и производстве","en":"2 years of accounting and production experience","zh":"2年会计及生产经验"}
+    }
+  ]
+}
