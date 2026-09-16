@@ -1233,7 +1233,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-app.get('/api/bootstrap', async (_, res) => {
+app.get('/api/bootstrap', async (req, res) => {
   try {
     const force = String(req.query.fresh || req.query.force || '').toLowerCase() === '1';
     const data = await getBootstrapDataCached({ force });
