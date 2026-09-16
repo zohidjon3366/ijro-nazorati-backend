@@ -1,14 +1,20 @@
 {
-  "name": "all-finance-v30-final",
-  "version": "30.0.0",
-  "private": true,
-  "description": "ALL FINANCE — O‘zbekiston Mustaqilligining 35 yilligiga bag‘ishlangan ko‘p tilli sayt",
+  "name": "tilda-ijro-nazorati-backend-stage8-4-1",
+  "version": "8.4.1",
+  "type": "module",
+  "main": "server.js",
   "scripts": {
-    "build": "node scripts/generate-pages.js && node scripts/verify-build.js",
-    "verify": "node scripts/verify-build.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
-  "engines": {
-    "node": ">=18"
-  }
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "bcryptjs": "^2.4.3",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "compression": "^1.7.4"
+  },
+  "description": "Ijro Nazorati Stage 8.4.1: My Soliq Monitoring Telegram integration, automatic STIR/report mapping, control-task auto completion and import journal."
 }
