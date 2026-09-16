@@ -1,6 +1,6 @@
 {
-  "name": "tilda-ijro-nazorati-backend-stage8-4-1",
-  "version": "8.4.1-hotfix.2",
+  "name": "tilda-ijro-nazorati-backend-stage8-4-2",
+  "version": "8.4.2",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -16,5 +16,5 @@
     "multer": "^1.4.5-lts.1",
     "compression": "^1.7.4"
   },
-  "description": "Ijro Nazorati Stage 8.4.1 Hotfix 2: accepted Soliq Monitoring reports auto-confirm the correct control-table month; includes Hotfix 1."
+  "description": "Ijro Nazorati Stage 8.4.2: Unified Soliq Integration, direct Soliq Monitor API, accepted reports and tax payment auto-control."
 }

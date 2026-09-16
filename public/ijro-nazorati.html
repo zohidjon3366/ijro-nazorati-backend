@@ -169,6 +169,10 @@ body{font-family:"Manrope",Inter,Arial,sans-serif} h1,h2,h3,h4,b,.btn,.menu butt
 .monitor-hero{border:1px solid var(--line);border-radius:24px;padding:20px;background:linear-gradient(135deg,rgba(79,124,255,.11),rgba(20,201,122,.08));margin-bottom:16px}.monitor-hero h3{margin:7px 0 6px;color:var(--text)}.monitor-hero p{margin:0;color:var(--text-soft);line-height:1.55}.monitor-toolbar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:14px}.monitor-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:0 0 16px}.monitor-card{border:1px solid var(--line);border-radius:18px;padding:14px;background:var(--card);box-shadow:0 9px 24px rgba(15,23,42,.06)}.monitor-card span{font-size:11px;color:var(--text-soft);font-weight:800}.monitor-card b{display:block;font-size:25px;margin-top:5px;color:var(--text)}.monitor-journal{overflow:auto;border:1px solid var(--line);border-radius:18px;max-height:600px}.monitor-journal table{min-width:1200px}.monitor-badge{display:inline-flex;align-items:center;padding:5px 8px;border-radius:999px;font-size:10.5px;font-weight:900;white-space:nowrap}.monitor-badge.ok{background:rgba(20,201,122,.14);color:#07814a}.monitor-badge.problem{background:rgba(239,83,80,.15);color:#b62f2c}.monitor-badge.pending{background:rgba(217,161,29,.15);color:#8c6500}.monitor-badge.unknown{background:rgba(148,163,184,.18);color:var(--text-soft)}.monitor-badge.auto{background:rgba(79,124,255,.14);color:#345fd1}.monitor-mapping-row{display:grid;grid-template-columns:1.7fr .8fr 1.2fr 100px 42px;gap:8px;align-items:center;margin-bottom:8px}.monitor-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}.monitor-note{font-size:12px;line-height:1.55;color:var(--text-soft)}@media(max-width:760px){.monitor-mapping-row{grid-template-columns:1fr}.monitor-toolbar .btn{flex:1 1 100%}}
 
 </style>
+<style>
+.monitor-source-badge{display:inline-flex;margin-top:6px;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:900;white-space:nowrap}.monitor-source-badge.report{background:#e6efff;color:#2859b8}.monitor-source-badge.payment{background:#e6f8ef;color:#087a47}.monitor-evidence{font-size:10.5px;margin-top:5px;line-height:1.35}.monitor-tax-row,.tax-map-head{display:grid;grid-template-columns:80px 1.35fr 1.4fr 1fr 1fr 88px 44px;gap:8px;align-items:center;margin-bottom:8px}.tax-map-head{font-size:10px;font-weight:900;color:var(--text-soft);padding:0 4px}@media(max-width:900px){.monitor-tax-row,.tax-map-head{grid-template-columns:1fr}.tax-map-head{display:none}}
+
+</style>
 </head>
 <body>
 <div id="root"><div class="loading">Yuklanmoqda...</div></div>
@@ -725,7 +729,11 @@ function exportControlMatrixExcel(){
 /* Stage 8.4 — Elektron arxiv va baza takomillashtirish markazi */
 .archive-hero{background:linear-gradient(135deg,rgba(74,79,193,.13),rgba(11,185,106,.08));border:1px solid var(--line);border-radius:24px;padding:18px;margin-bottom:16px}.archive-hero h3{margin:0 0 6px;color:var(--text)}.archive-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:16px 0}.archive-card{border:1px solid var(--line);background:var(--card);border-radius:20px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.archive-card span{display:block;color:var(--text-soft);font-size:12px;font-weight:800}.archive-card b{display:block;font-size:26px;margin-top:6px;color:var(--text)}.archive-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.archive-plan{display:grid;gap:10px}.archive-plan-item{border:1px solid var(--line);border-radius:16px;padding:13px;background:var(--surface)}.archive-plan-item b{color:var(--text)}.archive-plan-item p{margin:6px 0 0;color:var(--text-soft);font-size:12px;line-height:1.45}.stage-pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;background:rgba(74,79,193,.10);color:var(--primary);font-weight:900;font-size:12px;padding:6px 10px}
 
-</style></head><body><h3>Rahbar oylik nazorat jadvali — ${escapeHtml(controlBoardMonth)}</h3>${table.outerHTML}</body></html>`;
+</style><style>
+.monitor-source-badge{display:inline-flex;margin-top:6px;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:900;white-space:nowrap}.monitor-source-badge.report{background:#e6efff;color:#2859b8}.monitor-source-badge.payment{background:#e6f8ef;color:#087a47}.monitor-evidence{font-size:10.5px;margin-top:5px;line-height:1.35}.monitor-tax-row,.tax-map-head{display:grid;grid-template-columns:80px 1.35fr 1.4fr 1fr 1fr 88px 44px;gap:8px;align-items:center;margin-bottom:8px}.tax-map-head{font-size:10px;font-weight:900;color:var(--text-soft);padding:0 4px}@media(max-width:900px){.monitor-tax-row,.tax-map-head{grid-template-columns:1fr}.tax-map-head{display:none}}
+
+</style>
+</head><body><h3>Rahbar oylik nazorat jadvali — ${escapeHtml(controlBoardMonth)}</h3>${table.outerHTML}</body></html>`;
   const blob=new Blob([html],{type:'application/vnd.ms-excel;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='nazorat_jadvali_'+controlBoardMonth+'.xls'; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href); a.remove();},500);
 }
 
@@ -1476,6 +1484,94 @@ viewTitle=function(){ if(currentUser?.role==='director'&&currentView==='soliq-mo
 const __stage841MainView=mainView;
 mainView=function(){ if(currentUser?.role==='director'&&currentView==='soliq-monitor') return soliqMonitoringView(); return __stage841MainView(); };
 
+// ================= Stage 8.4.2 — Unified Soliq Integration UI =================
+soliqMonitorCache.taxMappings = soliqMonitorCache.taxMappings || [];
+monitorStatusBadge = function(group){
+  const g=String(group||'unknown');
+  const cls=['accepted_on_time','accepted','accepted_late','paid'].includes(g)?'ok':['problem','rejected'].includes(g)?'problem':g==='pending'?'pending':'unknown';
+  const label={accepted_on_time:'Hisobot qabul qilindi · o‘z vaqtida',accepted:'Hisobot qabul qilindi',accepted_late:'Hisobot qabul qilindi · kechikib',paid:'Soliq to‘landi',rejected:'To‘lov rad etildi',problem:'Muammoli',pending:'Tekshirilmoqda',unknown:'Noma’lum'}[g]||g;
+  return `<span class="monitor-badge ${cls}">${escapeHtml(label)}</span>`;
+};
+monitorActionText = function(action){
+  const map={auto_approved:'AUTO tasdiqlandi',auto_completed:'AUTO bajarildi',created_auto_approved:'Yaratildi + AUTO tasdiqlandi',created_auto_completed:'Yaratildi + AUTO bajarildi',already_done:'Oldin yakunlangan',problem_notified:'Muammo · xabar yuborildi',mapping_not_found:'Mapping topilmadi',company_not_found:'Korxona topilmadi',task_not_found:'Topshiriq topilmadi',assignee_mismatch:'Boshqa xodimga biriktirilgan',no_status_action:'Kutilmoqda',received:'Qabul qilindi',error:'Xato',payment_rejected_notified:'To‘lov rad etildi · xabar yuborildi',payment_pending:'To‘lov kutilmoqda'};
+  const a=String(action||'');
+  if(a.startsWith('payment_partial_')) { const p=a.split('_'); return `Qisman to‘landi ${p[2]||0}/${p[3]||0}`; }
+  if(a.includes('payment_auto_approved')) return 'Soliq to‘lovi · AUTO tasdiqlandi';
+  if(a.includes('payment_auto_completed')) return 'Soliq to‘lovi · AUTO bajarildi';
+  if(a.includes('created_payment_auto_approved')) return 'Yaratildi + soliq to‘lovi AUTO tasdiqlandi';
+  return map[a]||a||'-';
+};
+function monitorEventTypeBadge(r){
+  return String(r.event_type||'accepted_report')==='tax_payment'
+    ? '<span class="monitor-source-badge payment">💳 Soliq to‘lovi</span>'
+    : '<span class="monitor-source-badge report">📄 Hisobot</span>';
+}
+function monitorEventName(r){
+  if(String(r.event_type||'')==='tax_payment') return `${r.tax_code?escapeHtml(r.tax_code)+' — ':''}${escapeHtml(r.tax_name_raw||r.report_name_raw||'-')}`;
+  return escapeHtml(r.report_name_raw||'-');
+}
+function monitorEventPeriod(r){
+  if(String(r.event_type||'')==='tax_payment') return escapeHtml(r.control_month||r.payment_date||'-');
+  return escapeHtml(r.report_period||r.control_month||'-');
+}
+function monitorEvidence(r){
+  if(String(r.event_type||'')!=='tax_payment') return '';
+  const parts=[];
+  if(r.payment_no) parts.push(`№ ${escapeHtml(r.payment_no)}`);
+  if(r.payment_date) parts.push(escapeHtml(r.payment_date));
+  if(r.amount_raw) parts.push(`${escapeHtml(r.amount_raw)} so‘m`);
+  return parts.length?`<div class="muted monitor-evidence">${parts.join(' · ')}</div>`:'';
+}
+soliqMonitoringView = function(){
+  const s=soliqMonitorCache.summary;
+  if(!s){ setTimeout(loadSoliqMonitoringData,0); return `<div class="monitor-hero"><span class="stage-pill">Stage 8.4.2 · Unified Soliq Integration</span><h3>Hisobot + soliq to‘lovlarini avtomatik nazorat</h3><p>Soliq Monitor Direct API → STIR → mapping → Nazorat jadvali → AUTO tasdiqlash.</p></div><div class="empty">${soliqMonitorCache.error?escapeHtml(soliqMonitorCache.error):'Ma’lumotlar yuklanmoqda...'}</div>`; }
+  const cards=[['30 kunda jami',s.total||0],['Hisobot o‘z vaqtida',s.accepted_on_time||0],['Soliq to‘langan',s.paid||0],['Muammoli / rad', (s.problem||0)+(s.rejected||0)],['Mos topilmagan',s.unmatched||0]].map(([l,v])=>`<div class="monitor-card"><span>${l}</span><b>${v}</b></div>`).join('');
+  const rows=(soliqMonitorCache.imports||[]).map(r=>`<tr><td>${escapeHtml(formatDateTime(r.created_at)||'-')}<br>${monitorEventTypeBadge(r)}</td><td><b>${escapeHtml(r.company_name_raw||'')}</b><br><span class="muted monitor-code">${escapeHtml(r.company_tin||'')}</span></td><td>${monitorEventName(r)}${monitorEvidence(r)}</td><td>${monitorEventPeriod(r)}</td><td>${monitorStatusBadge(r.status_group)}</td><td>${escapeHtml(r.matched_control_item_name||'-')}</td><td>${r.matched_task_id?`<button class="btn secondary small" onclick="openTaskModal('${r.matched_task_id}')">Topshiriq</button>`:'-'}</td><td><span class="monitor-badge ${String(r.auto_action||'').includes('auto_')?'auto':'unknown'}">${escapeHtml(monitorActionText(r.auto_action))}</span>${r.error_message?`<div class="muted" style="margin-top:5px">${escapeHtml(r.error_message)}</div>`:''}</td><td><button class="btn ghost small" onclick="reprocessSoliqImport('${r.id}')">Qayta ishlash</button></td></tr>`).join('');
+  return `<div class="monitor-hero"><span class="stage-pill">Stage 8.4.2 · Unified Soliq Integration</span><h3>Soliq Monitor → Ijro Nazorati Direct Sync</h3><p>Qabul qilingan hisobotlar va bank tomonidan to‘langan soliq topshiriqnomalari strukturali API orqali keladi. Telegram parallel jurnal sifatida ishlashda davom etadi. 46 + 36 kabi kombinatsiyalar to‘liq bo‘lgandagina katak avtomatik “Tasdiqlandi” bo‘ladi.</p><div class="monitor-toolbar"><button class="btn" onclick="openSoliqManualImport()">+ Telegram matnini test/import</button><button class="btn secondary" onclick="openSoliqMappings()">📄 Hisobot mappinglari</button><button class="btn secondary" onclick="openTaxMappings()">💳 Soliq kodlari</button><button class="btn secondary" onclick="syncAcceptedSoliqMonitoring()">✓ Eski hisobotlarni sinxronlash</button><button class="btn ghost" onclick="loadSoliqMonitoringData(true)">Yangilash</button></div></div><div class="monitor-grid">${cards}</div><div class="panel"><div class="panel-head"><h3>Yagona import jurnali</h3><span class="soft-caption">Direct API + Telegram fallback · AUTO status: ${escapeHtml(s.autoStatus||'-')}</span></div><div class="panel-body"><div class="monitor-journal"><table><thead><tr><th>Vaqt / manba</th><th>Korxona / STIR</th><th>Hisobot yoki soliq</th><th>Nazorat oyi</th><th>Tashqi holat</th><th>Nazorat bandi</th><th>Topshiriq</th><th>Avto amal</th><th>Amal</th></tr></thead><tbody>${rows||'<tr><td colspan="9"><div class="empty">Importlar hali yo‘q.</div></td></tr>'}</tbody></table></div></div></div>`;
+};
+loadSoliqMonitoringData = async function(force=false){
+  if(soliqMonitorCache.loading&&!force) return;
+  soliqMonitorCache.loading=true; soliqMonitorCache.error='';
+  try{
+    const [s,i,m,tm]=await Promise.all([
+      api('/api/soliq-monitor/summary'), api('/api/soliq-monitor/imports?limit=500'), api('/api/soliq-monitor/mappings'), api('/api/soliq-monitor/tax-mappings')
+    ]);
+    soliqMonitorCache.summary=s.data||{}; soliqMonitorCache.imports=i.data||[]; soliqMonitorCache.mappings=m.data||[]; soliqMonitorCache.taxMappings=tm.data||[];
+  }catch(err){ soliqMonitorCache.error=err.message; }
+  finally{ soliqMonitorCache.loading=false; if(currentView==='soliq-monitor') render(); }
+};
+function taxMappingRowHtml(m={}){
+  const items=controlItemsAll(); const req=Array.isArray(m.required_codes)?m.required_codes.join(','):String(m.required_codes||'');
+  return `<div class="monitor-tax-row" data-tax-row="1"><input class="tm-code" placeholder="Kod" value="${escapeHtml(m.tax_code||'')}"><input class="tm-name" placeholder="Soliq nomi" value="${escapeHtml(m.tax_name||'')}"><select class="tm-item"><option value="">— Band tanlang —</option>${items.map(x=>`<option value="${x.id}" ${String(m.control_item_id||'')===String(x.id)?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}</select><input class="tm-group" placeholder="group_key" value="${escapeHtml(m.group_key||'')}"><input class="tm-required" placeholder="46,36" value="${escapeHtml(req)}"><input class="tm-priority" type="number" value="${escapeHtml(m.priority??100)}"><button class="btn danger small" onclick="deleteTaxMapping('${m.id||''}',this)">×</button><input type="hidden" class="tm-id" value="${escapeHtml(m.id||'')}"></div>`;
+}
+async function openTaxMappings(){
+  try{
+    if(!soliqMonitorCache.taxMappings.length){const r=await api('/api/soliq-monitor/tax-mappings');soliqMonitorCache.taxMappings=r.data||[];}
+    showModal('Soliq to‘lov kodlari → Nazorat bandlari',`<div class="hint" style="margin-top:0">Masalan 46 va 36 bir xil bandga bog‘lanadi va required_codes=46,36 bo‘lsa, ikkala to‘lov bank tomonidan to‘langandagina Nazorat jadvali AUTO tasdiqlanadi.</div><div class="tax-map-head"><span>Kod</span><span>Soliq nomi</span><span>Nazorat bandi</span><span>Guruh</span><span>Majburiy kodlar</span><span>Prioritet</span><span></span></div><div id="taxMappingRows">${(soliqMonitorCache.taxMappings||[]).map(taxMappingRowHtml).join('')}</div><div class="actions"><button class="btn secondary" onclick="addTaxMappingRow()">+ Soliq kodi</button><button class="btn ghost" onclick="closeModal()">Yopish</button><button class="btn" onclick="saveTaxMappings()">Saqlash</button></div>`);
+  }catch(err){alert(err.message);}
+}
+function addTaxMappingRow(){$('taxMappingRows')?.insertAdjacentHTML('beforeend',taxMappingRowHtml({priority:100}));}
+async function saveTaxMappings(){
+  try{
+    for(const row of [...document.querySelectorAll('#taxMappingRows [data-tax-row]')]){
+      const code=row.querySelector('.tm-code').value.trim(); if(!code) continue;
+      const sel=row.querySelector('.tm-item'); const id=sel.value; const name=sel.options[sel.selectedIndex]?.textContent||'';
+      await api('/api/soliq-monitor/tax-mappings',{method:'POST',body:JSON.stringify({id:row.querySelector('.tm-id').value||undefined,taxCode:code,taxName:row.querySelector('.tm-name').value.trim(),controlItemId:id||null,controlItemName:name&&id?name:null,groupKey:row.querySelector('.tm-group').value.trim(),requiredCodes:row.querySelector('.tm-required').value.split(',').map(x=>x.trim()).filter(Boolean),priority:Number(row.querySelector('.tm-priority').value||100),isActive:true})});
+    }
+    const r=await api('/api/soliq-monitor/tax-mappings');soliqMonitorCache.taxMappings=r.data||[];closeModal();alert('Soliq kodlari mappingi saqlandi');
+  }catch(err){alert(err.message);}
+}
+async function deleteTaxMapping(id,btn){if(!id){btn.closest('[data-tax-row]')?.remove();return;}if(!confirm('Soliq kodi mappingi o‘chirilsinmi?'))return;try{await api('/api/soliq-monitor/tax-mappings/'+id,{method:'DELETE'});btn.closest('[data-tax-row]')?.remove();soliqMonitorCache.taxMappings=soliqMonitorCache.taxMappings.filter(x=>x.id!==id);}catch(err){alert(err.message);}}
+headerAction=function(){ if(currentUser?.role==='director'&&currentView==='soliq-monitor') return '<div class="row-actions"><button class="btn secondary" onclick="openSoliqMappings()">📄 Hisobot mappinglari</button><button class="btn secondary" onclick="openTaxMappings()">💳 Soliq kodlari</button><button class="btn" onclick="loadSoliqMonitoringData(true)">Yangilash</button></div>'; return __stage841HeaderAction(); };
+
+
+reprocessSoliqImport = async function(id){
+  try{
+    const r=await api('/api/soliq-monitor/imports/'+id+'/reprocess',{method:'POST',body:'{}'});
+    const label=r.eventType?`${r.eventType} qayta ishlanib yakunlandi`:`Qayta ishlash tugadi. Hisobotlar: ${r.reports||0}`;
+    alert(label); await loadData(); await loadSoliqMonitoringData(true);
+  }catch(err){alert(err.message);}
+};
 </script>
 </body>
 </html>

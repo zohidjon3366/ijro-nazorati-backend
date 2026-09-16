@@ -1147,7 +1147,7 @@ app.get('/api/performance', async (req, res) => {
     const ms = Date.now() - started;
     return res.json({
       ok: true,
-      stage: '8.4.1',
+      stage: '8.4.2',
       ms,
       cache: {
         enabled: BOOTSTRAP_CACHE_SECONDS > 0,
@@ -1302,7 +1302,8 @@ async function getArchiveDataset() {
     ['task_attachments', '*', { order: { column: 'created_at', ascending: false } }],
     ['archive_snapshots', '*', { order: { column: 'created_at', ascending: false } }],
     ['monitoring_imports', '*', { order: { column: 'created_at', ascending: false } }],
-    ['monitoring_report_mappings', '*', { order: { column: 'priority', ascending: true } }]
+    ['monitoring_report_mappings', '*', { order: { column: 'priority', ascending: true } }],
+    ['monitoring_tax_mappings', '*', { order: { column: 'priority', ascending: true } }]
   ];
   const results = {};
   const warnings = [];
@@ -1318,7 +1319,7 @@ async function getArchiveDataset() {
   results.app_users = (results.app_users || []).map(stripPasswordFields);
   return {
     generatedAt: new Date().toISOString(),
-    stage: '8.4.1',
+    stage: '8.4.2',
     tables: results,
     controlItems,
     controlSettings,
@@ -1389,6 +1390,9 @@ function buildArchiveHtml(dataset, meta = {}) {
   ${archiveTable('Soliq Monitoring mappinglari', t.monitoring_report_mappings || [], [
     {label:'ID', key:'id'}, {label:'Hisobot pattern', key:'report_pattern'}, {label:'Match', key:'match_mode'}, {label:'Nazorat bandi ID', key:'control_item_id'}, {label:'Nazorat bandi', key:'control_item_name'}, {label:'Faol', key:'is_active'}, {label:'Ustuvorlik', key:'priority'}
   ])}
+  ${archiveTable('Soliq to‘lov kodlari mappinglari', t.monitoring_tax_mappings || [], [
+    {label:'ID', key:'id'}, {label:'Soliq kodi', key:'tax_code'}, {label:'Soliq nomi', key:'tax_name'}, {label:'Nazorat bandi ID', key:'control_item_id'}, {label:'Nazorat bandi', key:'control_item_name'}, {label:'Guruh', key:'group_key'}, {label:'Majburiy kodlar', value:r=>(r.required_codes||[]).join(', ')}, {label:'Faol', key:'is_active'}, {label:'Ustuvorlik', key:'priority'}
+  ])}
   <section class="section"><h2>Nazorat jadvali sozlamalari JSON</h2><pre>${htmlEscape(JSON.stringify(dataset.controlSettings || {}, null, 2))}</pre></section><div class="footer">Ushbu HTML arxiv mustaqil ochiladi. Parol hash maydoni xavfsizlik uchun arxivga kiritilmadi.</div></div></body></html>`;
   return html;
 }
@@ -1441,7 +1445,7 @@ app.post('/api/archive/save-html', async (req, res) => {
     const snapshot = await tryInsertArchiveSnapshot({
       file_name: fileName,
       storage_path: storagePath,
-      stage: '8.4.1',
+      stage: '8.4.2',
       table_count: Object.keys(dataset.tables || {}).length,
       row_count: rowCount,
       created_by: req.body?.actorId || req.body?.actor_id || null,
@@ -2563,6 +2567,7 @@ function isMonitoringTextCandidate(text) {
   return !!(n && /(?:stir|inn|tin)\s*:?\s*\d{9,12}/.test(n) && (n.includes('hisobot') || n.includes('otchet')) && (n.includes('holati') || n.includes('status')));
 }
 function monitoringDedupeKey(meta, tin, report) {
+  if (meta?.eventId) return createHash('sha256').update(`direct-event|${String(meta.eventId)}`).digest('hex');
   const base = [meta.source || 'telegram', meta.chatId || '', meta.messageId || '', tin || '', normalizeMonitorText(report.name), report.period || '', report.sentAt || report.sentRaw || '', normalizeMonitorText(report.status)].join('|');
   return createHash('sha256').update(base).digest('hex');
 }
@@ -2707,7 +2712,7 @@ function stripMonitoringAutoNote(note) {
 async function notifyMonitoringProblem({ company, task, assignee, report }) {
   if (!SOLIQ_MONITOR_NOTIFY_PROBLEMS) return;
   const directorsRes = await supabase.from('app_users').select('*').eq('role','director').eq('is_active',true).not('telegram_chat_id','is',null);
-  const text = ['🚨 My Soliq Monitoring — hisobot muammoli', '', `Korxona: ${company?.name || '-'}`, `STIR: ${company?.tin || '-'}`, `Hisobot: ${report.name || '-'}`, `Davr: ${report.period || report.periodRaw || '-'}`, `Holat: ${report.status || '-'}`, task ? `Topshiriq: ${task.title}` : 'Topshiriq: mos topshiriq topilmadi', assignee ? `Mas’ul: ${assignee.full_name}` : 'Mas’ul: aniqlanmadi'].join('\n');
+  const text = ['🚨 My Soliq Monitoring — muammoli holat', '', `Korxona: ${company?.name || '-'}`, `STIR: ${company?.tin || '-'}`, `Hisobot: ${report.name || '-'}`, `Davr: ${report.period || report.periodRaw || '-'}`, `Holat: ${report.status || '-'}`, task ? `Topshiriq: ${task.title}` : 'Topshiriq: mos topshiriq topilmadi', assignee ? `Mas’ul: ${assignee.full_name}` : 'Mas’ul: aniqlanmadi'].join('\n');
   const targets = new Set();
   if (assignee?.telegram_chat_id) targets.add(String(assignee.telegram_chat_id));
   for (const d of directorsRes.data || []) if (d.telegram_chat_id) targets.add(String(d.telegram_chat_id));
@@ -2725,7 +2730,8 @@ async function upsertMonitoringImportBase(meta, parsed, report, force = false) {
   const base = {
     source: meta.source || 'telegram', source_chat_id: meta.chatId || null, source_message_id: meta.messageId ? String(meta.messageId) : null,
     source_sender_id: meta.senderId ? String(meta.senderId) : null, company_tin: parsed.tin, company_name_raw: parsed.companyName || null,
-    report_name_raw: report.name, report_period: report.period || null, sent_at: report.sentAt || null, checked_at: report.checkedAt || null,
+    event_type: 'accepted_report', event_id: meta.eventId || null,
+    report_name_raw: report.name, report_period: report.period || null, control_month: monitoringControlMonth(report) || null, sent_at: report.sentAt || null, checked_at: report.checkedAt || null,
     external_status: report.status || null, status_group: report.statusGroup || 'unknown', raw_text: parsed.rawText,
     raw_payload: meta.rawPayload || {}, dedupe_key: dedupeKey, processed_at: null, auto_action: 'received', error_message: null
   };
@@ -2773,7 +2779,7 @@ async function processMonitoringReport(meta, parsed, report, { force = false } =
     }
     if (!task) return { import: await updateMonitoringImport(row.id, { matched_company_id:company.id, matched_control_item_id:item.id, matched_control_item_name:item.name, mapping_id:mapping?.id || null, auto_action:'task_not_found', error_message:`Mos nazorat topshirig‘i topilmadi (Nazorat oyi: ${controlMonth || '-'})` }) };
     if (!assignee && task.assignee_id) assignee = await getById('app_users', task.assignee_id).catch(()=>null);
-    const common = { matched_company_id:company.id, matched_control_item_id:item.id, matched_control_item_name:item.name, mapping_id:mapping?.id || null, matched_task_id:task.id, assignee_id:assignee?.id || null };
+    const common = { matched_company_id:company.id, matched_control_item_id:item.id, matched_control_item_name:item.name, mapping_id:mapping?.id || null, matched_task_id:task.id, assignee_id:assignee?.id || null, control_month:controlMonth || null };
 
     // Hotfix 2: My Soliq tashqi manbada hisobot qabul qilingan bo'lsa, bu bajarilganlikning faktik tasdig'i.
     // Shuning uchun topshiriq kimga biriktirilganidan qat'i nazar Nazorat jadvalida Tasdiqlandi bo'ladi; mas'ul xodim o'zgartirilmaydi.
@@ -2823,7 +2829,7 @@ app.get('/api/soliq-monitor/summary', async (req, res) => {
   try {
     ensureDb();
     const since = new Date(Date.now() - 30*24*60*60*1000).toISOString();
-    const groups = ['accepted_on_time','accepted','accepted_late','problem','pending','unknown'];
+    const groups = ['accepted_on_time','accepted','accepted_late','problem','pending','unknown','paid','rejected'];
     const queries = groups.map(g => supabase.from('monitoring_imports').select('id',{count:'exact',head:true}).gte('created_at',since).eq('status_group',g));
     const [totalRes, ...groupRes] = await Promise.all([supabase.from('monitoring_imports').select('id',{count:'exact',head:true}).gte('created_at',since), ...queries]);
     if (totalRes.error) throw totalRes.error;
@@ -2892,7 +2898,14 @@ app.post('/api/soliq-monitor/imports/:id/reprocess', async (req, res) => {
     const { data, error } = await supabase.from('monitoring_imports').select('*').eq('id',req.params.id).maybeSingle();
     if (error) throw error;
     if (!data) return res.status(404).json({ok:false,error:'Import yozuvi topilmadi'});
-    const result = await processSoliqMonitoringText(data.raw_text || '', { source:data.source || 'reprocess', chatId:data.source_chat_id || '', messageId:data.source_message_id || data.id, senderId:data.source_sender_id || '', rawPayload:data.raw_payload || {} }, { force:true });
+    let result;
+    if (String(data.event_type || '') === 'tax_payment' && data.raw_payload && typeof data.raw_payload === 'object') {
+      result = await processDirectSoliqEvent(data.raw_payload, { force:true });
+    } else if (String(data.source || '') === 'direct_api' && data.raw_payload && typeof data.raw_payload === 'object') {
+      result = await processDirectSoliqEvent(data.raw_payload, { force:true });
+    } else {
+      result = await processSoliqMonitoringText(data.raw_text || '', { source:data.source || 'reprocess', chatId:data.source_chat_id || '', messageId:data.source_message_id || data.id, senderId:data.source_sender_id || '', rawPayload:data.raw_payload || {} }, { force:true });
+    }
     return res.json(result);
   } catch (err) { return handleError(res, err); }
 });
@@ -2934,6 +2947,285 @@ app.delete('/api/soliq-monitor/mappings/:id', async (req, res) => {
 });
 
 
+// ================= Stage 8.4.2 — Unified Soliq Integration / Direct API =================
+function directEventStatusGroup(eventType, value) {
+  const n = normalizeMonitorText(value);
+  if (eventType === 'tax_payment') {
+    if (n.includes('rad') || n.includes('rejected') || n.includes('bekor') || n.includes('xato')) return 'rejected';
+    if (n.includes("to'langan") || n.includes('tolangan') || n.includes('тўланган') || n.includes('туланган') || n.includes('paid') || n.includes('оплачен')) return 'paid';
+    if (n.includes('kutil') || n.includes('pending') || n.includes('jarayon')) return 'pending';
+    return 'unknown';
+  }
+  return monitoringStatusGroup(value);
+}
+function directDateOnly(value) {
+  const raw = String(value || '').trim();
+  const iso = raw.match(/^(20\d{2})-(\d{2})-(\d{2})/)?.[0];
+  if (iso) return iso;
+  const m = raw.match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](20\d{2})/);
+  return m ? `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}` : '';
+}
+function directControlMonthFromDate(value) {
+  const d = directDateOnly(value);
+  return d ? d.slice(0,7) : '';
+}
+function directEventId(event) {
+  const supplied = cleanText(event?.event_id || event?.eventId || '');
+  if (supplied) return supplied;
+  return createHash('sha256').update(JSON.stringify(event || {})).digest('hex');
+}
+function directEventCompany(event) {
+  const c = event?.company || {};
+  return {
+    tin: cleanText(c.tin || c.stir || event?.company_tin || event?.tin || ''),
+    name: cleanText(c.name || event?.company_name || '')
+  };
+}
+function structuredReportFromEvent(event) {
+  const d = event?.data || {};
+  const year = cleanText(d.year || '');
+  const periodName = cleanText(d.period || '');
+  const periodRaw = [year, periodName].filter(Boolean).join(' / ');
+  let period = monitoringPeriodToMonth(periodRaw);
+  if (!period && /^20\d{2}-\d{2}$/.test(periodName)) period = periodName;
+  const sentRaw = cleanText(d.sent_at_raw || d.sent_at || '');
+  const checkedRaw = cleanText(d.checked_at_raw || d.checked_at || '');
+  const sentAt = d.sent_at && /^20\d{2}-/.test(String(d.sent_at)) ? String(d.sent_at) : monitorDateIso(sentRaw);
+  const checkedAt = d.checked_at && /^20\d{2}-/.test(String(d.checked_at)) ? String(d.checked_at) : monitorDateIso(checkedRaw);
+  const status = cleanText(d.external_status || d.status || '');
+  return {
+    name: cleanText(d.name || d.report_name || ''), periodRaw, period,
+    sentAt: sentAt || null, sentRaw: sentRaw || String(d.sent_at || ''), status,
+    statusGroup: cleanText(d.status_group || '') || monitoringStatusGroup(status),
+    checkedAt: checkedAt || null, checkedRaw: checkedRaw || String(d.checked_at || ''),
+    rawBlock: JSON.stringify(d)
+  };
+}
+async function monitoringTaxMappings() {
+  const { data, error } = await supabase.from('monitoring_tax_mappings').select('*').eq('is_active', true).order('priority', { ascending:true }).order('created_at',{ascending:true});
+  if (error) {
+    if (monitoringTableMissing(error) || String(error?.message || '').includes('monitoring_tax_mappings')) return [];
+    throw error;
+  }
+  return data || [];
+}
+function chooseAutoTaxControlItem(taxCode, taxName, items) {
+  const code = String(taxCode || '').replace(/^0+/, '') || '0';
+  const name = normalizeMonitorText(taxName || '');
+  const arr = Array.isArray(items) ? items : [];
+  const scoreItem = (item) => {
+    const x = normalizeMonitorText(item.name || '');
+    if (['46','36'].includes(code) && x.includes('jshods') && x.includes('ijtimoiy') && (x.includes("to'lov") || x.includes('tolov'))) return 120;
+    if (code === '100' && x.includes('aylanma') && (x.includes("to'lov") || x.includes('tolov'))) return 115;
+    if (code === '1' && (x.includes('nds') || x.includes('qqs') || x.includes("qo'shilgan qiymat"))) return 110;
+    if (code === '44' && x.includes('mol-mulk')) return 105;
+    if (code === '53' && x.includes('yer solig')) return 105;
+    if (code === '52' && x.includes('suv')) return 105;
+    if (code === '32' && x.includes('foyda')) return 105;
+    if (name && x.length > 4 && (name.includes(x) || x.includes(name.slice(0, Math.min(name.length, 24))))) return 50;
+    return 0;
+  };
+  const ranked = arr.map(item=>({item,score:scoreItem(item)})).sort((a,b)=>b.score-a.score);
+  return ranked[0]?.score >= 50 ? ranked[0].item : null;
+}
+async function matchTaxPaymentControlItem(taxCode, taxName) {
+  const code = String(taxCode || '').replace(/^0+/, '') || '0';
+  const items = await readControlItems().catch(() => normalizeControlItems(DEFAULT_CONTROL_ITEMS));
+  const mappings = await monitoringTaxMappings();
+  const mapping = mappings.find(m => String(m.tax_code || '').replace(/^0+/, '') === code) || null;
+  let item = null;
+  if (mapping) {
+    item = items.find(x => mapping.control_item_id && String(x.id) === String(mapping.control_item_id)) ||
+      items.find(x => mapping.control_item_name && normalizeMonitorText(x.name) === normalizeMonitorText(mapping.control_item_name)) ||
+      items.find(x => mapping.control_item_name && normalizeMonitorText(x.name).includes(normalizeMonitorText(mapping.control_item_name)));
+  }
+  if (!item) item = chooseAutoTaxControlItem(code, taxName, items);
+  const requiredCodes = Array.isArray(mapping?.required_codes) && mapping.required_codes.length
+    ? mapping.required_codes.map(x => String(x).replace(/^0+/, '') || '0')
+    : (['46','36'].includes(code) ? ['46','36'] : [code]);
+  return { item, mapping, requiredCodes, groupKey: mapping?.group_key || (['46','36'].includes(code) ? 'payroll_taxes' : `tax_${code}`) };
+}
+function paymentEvidenceNote(data, requiredCodes = []) {
+  return [
+    'My Soliq Monitoring · Soliq to‘lovi',
+    `Soliq: ${data.tax_code || '-'} — ${data.tax_name || '-'}`,
+    `Topshiriqnoma: ${data.payment_no || '-'}`,
+    `To‘lov sanasi: ${data.payment_date || '-'}`,
+    `Summa: ${data.amount_raw || data.amount || '-'}`,
+    `Holat: ${data.external_status || '-'}`,
+    requiredCodes.length > 1 ? `To‘liq tasdiq uchun kodlar: ${requiredCodes.join(', ')}` : ''
+  ].filter(Boolean).join('\n');
+}
+async function upsertTaxPaymentImport(event, meta, companyInfo, data, statusGroup, controlMonth) {
+  const eventId = directEventId(event);
+  const dedupeKey = createHash('sha256').update(`direct-event|${eventId}`).digest('hex');
+  const existing = await supabase.from('monitoring_imports').select('*').eq('dedupe_key',dedupeKey).maybeSingle();
+  if (existing.error) throw existing.error;
+  const base = {
+    source: meta.source || 'direct_api', source_chat_id:null, source_message_id:eventId, source_sender_id:'soliq-monitor',
+    event_type:'tax_payment', event_id:eventId,
+    company_tin:companyInfo.tin, company_name_raw:companyInfo.name || null,
+    report_name_raw:data.tax_name || `Soliq kodi ${data.tax_code || '-'}`, report_period:controlMonth || null, control_month:controlMonth || null,
+    sent_at:data.payment_date ? `${data.payment_date}T00:00:00+05:00` : null, checked_at:event.observed_at || new Date().toISOString(),
+    external_status:data.external_status || null, status_group:statusGroup,
+    tax_code:String(data.tax_code || ''), tax_name_raw:data.tax_name || null, payment_no:data.payment_no || null,
+    payment_date:data.payment_date || null, amount:data.amount === null || data.amount === undefined ? null : Number(data.amount), amount_raw:data.amount_raw || null,
+    raw_text:JSON.stringify(event), raw_payload:event, dedupe_key:dedupeKey, processed_at:null, auto_action:'received', error_message:null
+  };
+  if (existing.data) {
+    return { row:existing.data, duplicate:true };
+  }
+  const { data:row, error } = await supabase.from('monitoring_imports').insert(base).select('*').single();
+  if (error) {
+    if (error.code === '23505') {
+      const dup = await supabase.from('monitoring_imports').select('*').eq('dedupe_key',dedupeKey).maybeSingle();
+      return { row:dup.data, duplicate:true };
+    }
+    throw error;
+  }
+  return { row, duplicate:false };
+}
+async function latestTaxPaymentState(companyId, item, controlMonth, requiredCodes) {
+  let q = supabase.from('monitoring_imports').select('tax_code,status_group,external_status,payment_no,payment_date,amount,amount_raw,created_at,id')
+    .eq('event_type','tax_payment').eq('matched_company_id',companyId).eq('control_month',controlMonth)
+    .order('created_at',{ascending:false}).limit(500);
+  if (item?.id) q = q.eq('matched_control_item_id',String(item.id));
+  else if (item?.name) q = q.eq('matched_control_item_name',String(item.name));
+  const { data, error } = await q;
+  if (error) throw error;
+  const latest = new Map();
+  for (const row of data || []) {
+    const code = String(row.tax_code || '').replace(/^0+/, '') || '0';
+    if (!latest.has(code)) latest.set(code,row);
+  }
+  const details = requiredCodes.map(code=>({code,row:latest.get(String(code)) || null}));
+  const paidCount = details.filter(x=>x.row?.status_group === 'paid').length;
+  return { details, paidCount, total:requiredCodes.length, complete:requiredCodes.length > 0 && paidCount === requiredCodes.length };
+}
+async function markTaskPartialFromTax(task, data, progress) {
+  const oldStatus = task.status;
+  let updated = task;
+  if (!isTaskDoneServer(oldStatus) && ['Yangi','Qabul qilindi'].includes(oldStatus)) {
+    const { data:row, error } = await supabase.from('tasks').update({status:'Bajarilmoqda',updated_at:new Date().toISOString()}).eq('id',task.id).select('*').single();
+    if (error) throw error;
+    updated = row;
+  }
+  const note = `${paymentEvidenceNote(data)}\nQisman: ${progress.paidCount}/${progress.total}`;
+  await addTaskHistory(task.id, task.assignee_id || null, 'My Soliq Monitoring: soliq to‘lovi qisman bajarildi', oldStatus, updated.status, note);
+  return updated;
+}
+async function processMonitoringTaxPayment(event, meta = {}, {force=false} = {}) {
+  const companyInfo = directEventCompany(event);
+  const d = event?.data || {};
+  const data = {
+    payment_no:cleanText(d.payment_no || ''), payment_date:directDateOnly(d.payment_date || d.order_date_raw || ''),
+    tax_code:String(d.tax_code || '').replace(/^0+/, '') || '0', tax_name:cleanText(d.tax_name || ''),
+    amount:d.amount === null || d.amount === undefined ? null : Number(d.amount), amount_raw:cleanText(d.amount_raw || ''),
+    external_status:cleanText(d.external_status || d.status || ''), status_group:cleanText(d.status_group || '')
+  };
+  const statusGroup = ['paid','rejected','pending','unknown'].includes(data.status_group) ? data.status_group : directEventStatusGroup('tax_payment',data.external_status);
+  const controlMonth = directControlMonthFromDate(data.payment_date || event.observed_at) || monitoringMonthFromIso(event.observed_at) || '';
+  const base = await upsertTaxPaymentImport(event,meta,companyInfo,data,statusGroup,controlMonth);
+  if (base.duplicate && !force && base.row?.processed_at) return {duplicate:true,import:base.row};
+  const row = base.row;
+  try {
+    if (!companyInfo.tin) return { import: await updateMonitoringImport(row.id,{auto_action:'company_not_found',error_message:'STIR berilmagan'}) };
+    const company = await findMonitoringCompany(companyInfo.tin);
+    if (!company) return { import: await updateMonitoringImport(row.id,{auto_action:'company_not_found',error_message:`STIR ${companyInfo.tin} bo‘yicha korxona topilmadi`}) };
+    const {item,mapping,requiredCodes,groupKey} = await matchTaxPaymentControlItem(data.tax_code,data.tax_name);
+    if (!item) return { import: await updateMonitoringImport(row.id,{matched_company_id:company.id,auto_action:'mapping_not_found',error_message:`Soliq kodi ${data.tax_code} Nazorat bandiga mapping qilinmadi`}) };
+    let task = await findMonitoringTask(company.id,item,controlMonth);
+    let assignee = task?.assignee_id ? await getById('app_users',task.assignee_id).catch(()=>null) : null;
+    let created=false;
+    const pseudoReport={name:`Soliq to‘lovi: ${data.tax_code} — ${data.tax_name}`,period:controlMonth,periodRaw:controlMonth,status:data.external_status,statusGroup,sentAt:data.payment_date?`${data.payment_date}T00:00:00+05:00`:null,sentRaw:data.payment_date,checkedAt:event.observed_at||new Date().toISOString(),checkedRaw:event.observed_at||''};
+    if (!task && SOLIQ_MONITOR_CREATE_MISSING_TASK && controlMonth) {
+      assignee = await monitoringDefaultAssignee();
+      task = await createMonitoringTask(company,item,controlMonth,assignee,pseudoReport);
+      created=true;
+    }
+    if (!task) return { import: await updateMonitoringImport(row.id,{matched_company_id:company.id,matched_control_item_id:item.id,matched_control_item_name:item.name,tax_group_key:groupKey,auto_action:'task_not_found',error_message:`Mos nazorat topshirig‘i topilmadi (Nazorat oyi: ${controlMonth || '-'})`}) };
+    if (!assignee && task.assignee_id) assignee=await getById('app_users',task.assignee_id).catch(()=>null);
+    const common={matched_company_id:company.id,matched_control_item_id:item.id,matched_control_item_name:item.name,mapping_id:null,tax_mapping_id:mapping?.id||null,tax_group_key:groupKey,matched_task_id:task.id,assignee_id:assignee?.id||null,control_month:controlMonth};
+    await updateMonitoringImport(row.id,{...common,auto_action:'received',error_message:null});
+    if (statusGroup === 'rejected') {
+      await notifyMonitoringProblem({company,task,assignee,report:pseudoReport});
+      return {import:await updateMonitoringImport(row.id,{...common,auto_action:'payment_rejected_notified',error_message:data.external_status||'Bank tomonidan rad etilgan'}),controlMonth};
+    }
+    if (statusGroup !== 'paid') return {import:await updateMonitoringImport(row.id,{...common,auto_action:'payment_pending',error_message:`To‘lov holati: ${data.external_status||statusGroup}`}),controlMonth};
+    const progress = await latestTaxPaymentState(company.id,item,controlMonth,requiredCodes);
+    if (!progress.complete) {
+      const updatedTask=await markTaskPartialFromTax(task,data,progress);
+      return {import:await updateMonitoringImport(row.id,{...common,auto_action:`payment_partial_${progress.paidCount}_${progress.total}`,error_message:`Majburiy soliq kodlari: ${requiredCodes.join(', ')}. To‘langan: ${progress.paidCount}/${progress.total}`}),task:updatedTask,progress,controlMonth};
+    }
+    pseudoReport.status=`Bank tomonidan to‘langan · ${requiredCodes.join('+')}`;
+    const done=await autoCompleteMonitoringTask(task,pseudoReport);
+    return {import:await updateMonitoringImport(row.id,{...common,auto_action:created?`created_payment_${done.action}`:`payment_${done.action}`,error_message:`Tasdiqlangan soliq kodlari: ${requiredCodes.join(', ')}`}),task:done.task,progress,controlMonth};
+  } catch (err) {
+    await updateMonitoringImport(row.id,{auto_action:'error',error_message:err.message||'Tax payment import xatosi'}).catch(()=>{});
+    throw err;
+  }
+}
+async function processDirectSoliqEvent(event,{force=false}={}) {
+  if (!event || typeof event !== 'object') throw new Error('Event JSON obyekt bo‘lishi kerak');
+  const eventType=cleanText(event.event_type||event.type||'');
+  const companyInfo=directEventCompany(event);
+  if (!companyInfo.tin) throw new Error('company.tin/STIR kerak');
+  const meta={source:'direct_api',eventId:directEventId(event),messageId:directEventId(event),senderId:'soliq-monitor',rawPayload:event};
+  if (eventType === 'accepted_report') {
+    const report=structuredReportFromEvent(event);
+    if (!report.name) throw new Error('accepted_report uchun data.name kerak');
+    const parsed={tin:companyInfo.tin,companyName:companyInfo.name,reports:[report],rawText:JSON.stringify(event)};
+    const result=await processMonitoringReport(meta,parsed,report,{force});
+    invalidateBootstrapCache();
+    return {ok:true,eventType,eventId:meta.eventId,result};
+  }
+  if (eventType === 'tax_payment') {
+    const result=await processMonitoringTaxPayment(event,meta,{force});
+    invalidateBootstrapCache();
+    return {ok:true,eventType,eventId:meta.eventId,result};
+  }
+  throw new Error(`Qo‘llab-quvvatlanmaydigan event_type: ${eventType || '-'}`);
+}
+app.get('/api/integrations/soliq-monitor/health', async (req,res)=>{
+  try {
+    if (!monitorImportSecretAllowed(req)) return res.status(401).json({ok:false,error:'Unauthorized'});
+    ensureDb();
+    const [maps,taxMaps]=await Promise.all([monitoringMappings().catch(()=>[]),monitoringTaxMappings().catch(()=>[])]);
+    return res.json({ok:true,stage:'8.4.2',integration:'Unified Soliq Integration',directApi:true,reportMappings:maps.length,taxMappings:taxMaps.length,serverTime:new Date().toISOString()});
+  } catch(err){ return handleError(res,err); }
+});
+app.post('/api/integrations/soliq-monitor/events', async (req,res)=>{
+  try {
+    if (!monitorImportSecretAllowed(req)) return res.status(401).json({ok:false,error:'Unauthorized'});
+    ensureDb();
+    const events=Array.isArray(req.body?.events)?req.body.events:[req.body];
+    if (!events.length || !events[0]) return res.status(400).json({ok:false,error:'Event kerak'});
+    const results=[];
+    for (const event of events.slice(0,200)) results.push(await processDirectSoliqEvent(event));
+    return res.json({ok:true,processed:results.length,results});
+  } catch(err){ return handleError(res,err); }
+});
+app.get('/api/soliq-monitor/tax-mappings', async (req,res)=>{
+  try { ensureDb(); const {data,error}=await supabase.from('monitoring_tax_mappings').select('*').order('priority',{ascending:true}).order('created_at',{ascending:true}); if(error) throw error; return res.json({ok:true,data:data||[]}); }
+  catch(err){ return handleError(res,err); }
+});
+app.post('/api/soliq-monitor/tax-mappings', async (req,res)=>{
+  try {
+    ensureDb();
+    const code=String(req.body?.taxCode||req.body?.tax_code||'').replace(/\D/g,'').replace(/^0+/,'') || '';
+    if(!code) return res.status(400).json({ok:false,error:'Soliq kodi kerak'});
+    const required=Array.isArray(req.body?.requiredCodes||req.body?.required_codes)?(req.body.requiredCodes||req.body.required_codes):String(req.body?.requiredCodes||'').split(',');
+    const payload={tax_code:code,tax_name:cleanText(req.body?.taxName||req.body?.tax_name)||null,control_item_id:cleanText(req.body?.controlItemId||req.body?.control_item_id)||null,control_item_name:cleanText(req.body?.controlItemName||req.body?.control_item_name)||null,group_key:cleanText(req.body?.groupKey||req.body?.group_key)||`tax_${code}`,required_codes:required.map(x=>String(x).replace(/\D/g,'').replace(/^0+/,'')).filter(Boolean),is_active:req.body?.isActive===undefined?true:!!req.body.isActive,priority:Number(req.body?.priority||100),updated_at:new Date().toISOString()};
+    if(!payload.required_codes.length) payload.required_codes=[code];
+    let query=req.body?.id?supabase.from('monitoring_tax_mappings').update(payload).eq('id',req.body.id).select('*').single():supabase.from('monitoring_tax_mappings').insert(payload).select('*').single();
+    const {data,error}=await query; if(error) throw error; return res.json({ok:true,data});
+  } catch(err){ return handleError(res,err); }
+});
+app.delete('/api/soliq-monitor/tax-mappings/:id', async(req,res)=>{
+  try{ensureDb();const {error}=await supabase.from('monitoring_tax_mappings').delete().eq('id',req.params.id);if(error)throw error;return res.json({ok:true});}catch(err){return handleError(res,err);}
+});
+
+
 app.listen(PORT, () => {
-  console.log(`Ijro nazorati backend Stage 8.4.1 running on port ${PORT}`);
+  console.log(`Ijro nazorati backend Stage 8.4.2 running on port ${PORT}`);
 });

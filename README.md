@@ -1,56 +1,36 @@
-# Ijro Nazorati — Stage 8.4.1 Hotfix 2
-## My Soliq Monitoring Integration → AUTO Nazorat tasdig‘i
+# Ijro Nazorati — Stage 8.4.2
+## Unified Soliq Integration + Soliq Monitor Direct Sync
 
-> **Stage 8.4.1 Hotfix 2 — AUTO Tasdiqlandi:** My Soliq Monitoring'da hisobot `Qabul qilingan` / `Qabul qilingan o'z vaqtida` bo'lsa, mos Nazorat jadvali katagi avtomatik `Direktor tasdiqladi` holatiga o'tadi. Mas'ul boshqa xodim bo'lsa ham u qayta biriktirilmaydi; faqat bajarilganlik faktik tasdiqlanadi. Nazorat oyi default bo'yicha **jo'natilgan sana oyi**dan olinadi (masalan Avgust hisoboti 11.09.2026 da yuborilgan bo'lsa Sentabr Nazorat jadvalida tasdiqlanadi). Oldingi importlar uchun `Qabul qilinganlarni Nazorat jadvaliga sinxronlash` tugmasi qo'shildi. Hotfix 1 (`req is not defined`) ham saqlangan.
+Stage 8.4.2 Stage 8.4.1 Hotfix 2 ustiga qurilgan. Mavjud `companies`, `tasks`, `task_history`, `app_users` va oldingi monitoring ma'lumotlari o'chirilmaydi.
 
-> **Stage 8.4.1 Hotfix 1 (bootstrap fix):** `/api/bootstrap` route ichida request parametri `_` deb nomlangan, lekin kodda `req.query` ishlatilgan edi. Shu sabab login'dan keyin `req is not defined` xatosi chiqardi. Hotfix'da route `(req, res)` qilib tuzatildi. Supabase schema yoki ma'lumotlarga o'zgarish kiritilmaydi.
+## Nima yangilandi
 
-
-Stage 8.4.1 Stage 8.4 ustiga qurilgan. Oldingi ma'lumotlar o'chirilmaydi. Integratsiya uchun yangi jadvallar **qo'shiladi**, mavjud `companies`, `tasks`, `task_history`, `app_users` jadvallari saqlanadi.
-
-## Asosiy imkoniyatlar
-
-- My Soliq Monitoring Telegram xabarini avtomatik aniqlash.
-- STIR bo'yicha `companies` jadvalidan korxonani topish.
-- Bitta Telegram xabaridagi bir nechta hisobotni alohida import qilish.
-- Yil/davr, jo'natilgan sana, tekshirilgan sana va tashqi statusni parse qilish.
-- Hisobot nomini Nazorat jadvali bandiga mapping qilish.
-- Mos nazorat topshirig'ini `company + month + control item` orqali topish.
-- Zohidjonga biriktirilgan topshiriqni qabul qilingan status bo'lsa avtomatik `Bajarildi` yoki `Direktor tasdiqladi` holatiga o'tkazish.
-- Mos topshiriq mavjud bo'lmasa, ixtiyoriy ravishda Zohidjon uchun nazorat topshirig'ini avtomatik yaratish.
-- Muammoli/rad etilgan hisobot bo'lsa mas'ul xodim va direktor(lar)ga Telegram ogohlantirish yuborish.
-- Dublikat xabarlar `dedupe_key` orqali qayta yopilmaydi.
-- Rahbar panelida alohida **Soliq Monitoring** bo'limi: statistika, import jurnali, mappinglar, qayta ishlash va qo'lda test/import.
-- Elektron HTML arxivga monitoring importlari va mappinglari ham qo'shildi.
-
-## Muhim ishlash qoidasi — Hotfix 2
-
-- Tashqi status `Qabul qilingan`, `Qabul qilingan o'z vaqtida` yoki `Qabul qilingan, kechikib` bo'lsa — mos Nazorat topshirig'i **avtomatik tasdiqlanadi**.
-- Topshiriq boshqa xodimga biriktirilgan bo'lsa ham mas'ul o'zgarmaydi; `Direktor tasdiqladi` statusi qo'yiladi.
-- Default Nazorat oyi: `sent_month`. Hisobot davri Avgust, jo'natilgan sana Sentabr bo'lsa — Sentabr jadvaliga tushadi.
-- Mapping topilmasa avtomatik tasdiqlash bo'lmaydi; rahbar `Mappinglar` orqali bog'laydi.
-- Oldin import qilingan qabul qilingan yozuvlar uchun Soliq Monitoring bo'limidagi **Qabul qilinganlarni Nazorat jadvaliga sinxronlash** tugmasini bir marta bosing.
+- **Direct API**: Windows'dagi ALL FINANCE SOLIQ MONITOR v7.5.56 endi Telegramga bog'liq bo'lmasdan Ijro Nazoratiga strukturali JSON yuboradi.
+- `accepted_report` eventlari: qabul qilingan hisobot → STIR → korxona → hisobot mappingi → Nazorat bandi → `Direktor tasdiqladi`.
+- `tax_payment` eventlari: to'lov №, sana, soliq kodi, summa, bank holati bilan import qilinadi.
+- **46 + 36 kombinatsiyasi**: JShDS va Ijtimoiy soliq ikkisi ham bank tomonidan to'langandagina `JSHODS VA IJTIMOIY SOLIQ TO'LOVLARI` bandi AUTO tasdiqlanadi. Bittasi bo'lsa `Bajarilmoqda / qisman` holatida qoladi.
+- Rad etilgan to'lovlar import jurnalida qizil ko'rinadi va mas'ul xodim + direktor Telegram orqali ogohlantiriladi.
+- Soliq kodi → Nazorat bandi mappinglari uchun yangi `monitoring_tax_mappings` jadvali va rahbar UI qo'shildi.
+- Telegramdagi eski My Soliq Monitoring import oqimi fallback sifatida saqlanadi.
+- Elektron arxiv yangi tax mappinglarni ham o'qiydi.
 
 ## Supabase migration — MAJBURIY
 
-Stage 8.4.1 integratsiyasi uchun Supabase SQL Editor'da:
+Deploydan oldin Supabase SQL Editor'da:
 
-`supabase_stage8_4_1_schema_upgrade.sql`
+`supabase_stage8_4_2_schema_upgrade.sql`
 
-faylini bir marta ishga tushiring.
+faylini **bir marta** Run qiling.
 
-SQL mavjud ma'lumotlarni o'chirmaydi. `DROP`, `TRUNCATE`, `DELETE` yo'q.
+SQL cumulative: Stage 8.4 + 8.4.1 + 8.4.2 strukturalarini idempotent yaratadi. Mavjud ma'lumotlarni o'chirmaydi; `TRUNCATE`/ma'lumotni tozalash yo'q.
 
-Yangi jadvallar:
+Yangi/yangilangan obyektlar:
 
-- `monitoring_imports`
-- `monitoring_report_mappings`
-
-Stage 8.4 jadvallari mavjud bo'lmasa, shu cumulative SQL ularni ham yaratadi.
+- `monitoring_imports` — `event_type`, `event_id`, `control_month`, tax payment dalillari ustunlari;
+- `monitoring_tax_mappings` — soliq kodlari va kombinatsiyalar;
+- oldingi `monitoring_report_mappings` saqlanadi.
 
 ## Render ENV
-
-Tavsiya etilgan:
 
 ```text
 SOLIQ_MONITOR_ENABLED=true
@@ -59,83 +39,70 @@ SOLIQ_MONITOR_AUTO_STATUS=Direktor tasdiqladi
 SOLIQ_MONITOR_CREATE_MISSING_TASK=true
 SOLIQ_MONITOR_NOTIFY_PROBLEMS=true
 SOLIQ_MONITOR_NOTIFY_CUSTOMER=false
-SOLIQ_MONITOR_ALLOW_USER_FORWARD=true
 SOLIQ_MONITOR_CONTROL_MONTH_MODE=sent_month
 SOLIQ_MONITOR_ACCEPTED_SYNC_ANY_ASSIGNEE=true
 SOLIQ_MONITOR_CONTROL_TIMEZONE=Asia/Tashkent
+SOLIQ_MONITOR_IMPORT_SECRET=UZUN_MAXFIY_KALIT
 ```
 
-Xavfsizlik uchun monitoring xabarlari keladigan maxsus Telegram guruhni cheklash tavsiya qilinadi:
+`SOLIQ_MONITOR_IMPORT_SECRET` qiymati Soliq Monitor v7.5.56 dagi **KPI / Ijro Nazorati Direct Sync → Maxfiy kalit** bilan aynan bir xil bo'lishi kerak.
 
-```text
-SOLIQ_MONITOR_CHAT_IDS=-100xxxxxxxxxx
-```
+## Direct API
 
-My Soliq Monitoring bot ID ma'lum bo'lgach:
+Health:
 
-```text
-SOLIQ_MONITOR_SOURCE_BOT_IDS=123456789
-```
+`GET /api/integrations/soliq-monitor/health`
 
-Bir nechta qiymat vergul bilan:
+Event:
 
-```text
-SOLIQ_MONITOR_SOURCE_BOT_IDS=123456789,987654321
-SOLIQ_MONITOR_CHAT_IDS=-1001111111111,-1002222222222
-```
+`POST /api/integrations/soliq-monitor/events`
 
-Qo'lda HTTP import endpointini himoyalash uchun ixtiyoriy:
+Header:
 
-```text
-SOLIQ_MONITOR_IMPORT_SECRET=uzun-maxfiy-kalit
-```
+`x-soliq-monitor-secret: <SOLIQ_MONITOR_IMPORT_SECRET>`
 
-> Eslatma: brauzerdagi rahbar UI'dan qo'lda import ishlatilsa va `SOLIQ_MONITOR_IMPORT_SECRET` o'rnatilgan bo'lsa, hozirgi frontend secret yubormaydi. Secret asosan tashqi server-to-server import uchun mo'ljallangan. Telegram webhook oqimi secret talab qilmaydi.
+Qo'llab-quvvatlanadigan eventlar:
 
-## Telegram avtomatik oqimi
+- `accepted_report`
+- `tax_payment`
 
-Eng qulay sxema:
+## Default tax mapping
 
-1. Alohida Telegram guruh yarating, masalan `Soliq Monitoring → Ijro Nazorati`.
-2. My Soliq Monitoring bot va Ijro Nazorati botini shu guruhga qo'shing.
-3. Ijro Nazorati botida Bot-to-Bot Communication Mode'ni yoqing.
-4. Ijro Nazorati botini guruh admini qiling yoki kerak bo'lsa Group Privacy Mode'ni o'chiring.
-5. Render'da `SOLIQ_MONITOR_CHAT_IDS` ni shu guruh ID'iga sozlang.
-6. My Soliq Monitoring xabari guruhga tushishi bilan `/api/telegram/webhook` uni avtomatik parse qiladi.
+- `46 + 36` → `JSHODS VA IJTIMOIY SOLIQ TO'LOVLARI`
+- `1` → NDS/QQS
+- `100` → Aylanmadan soliq to'lovi
+- `44` → Mol-mulk solig'i
+- `53` → Yer solig'i
+- `52` → Suv solig'i
+- `32` → Foyda solig'i
 
-Agar My Soliq Monitoring faqat shaxsiy chatga xabar yuborsa va uni guruhga avtomatik chiqarish imkoniyati bo'lmasa, xabarni Ijro Nazorati botiga forward qilish mumkin. `SOLIQ_MONITOR_ALLOW_USER_FORWARD=true` bo'lsa, bot-origin forward qabul qilinadi.
-
-## Statuslar
-
-- `Qabul qilingan o'z vaqtida` → `accepted_on_time` → AUTO yopish.
-- `Qabul qilingan` → `accepted` → AUTO yopish.
-- `Qabul qilingan, kechikib` → `accepted_late` → AUTO yopish + jurnal ogohlantirishi.
-- `Rad etilgan / xato / qabul qilinmagan` → `problem` → xodim + direktor Telegram ogohlantirish.
-- `Tekshirilmoqda / kutilmoqda` → `pending` → topshiriq yopilmaydi.
+Rahbar `Soliq Monitoring → Soliq kodlari` oynasida mappinglarni o'zgartira oladi.
 
 ## Deploy
 
-GitHub repo'da almashtiring:
+Repo'da almashtiring:
 
 - `server.js`
 - `package.json`
 - `README.md`
 - `public/ijro-nazorati.html`
 
-So'ng Render:
+So'ng Render: **Manual Deploy → Deploy latest commit**.
 
-`Manual Deploy → Deploy latest commit`
-
-Tilda iframe manzili o'zgarmaydi:
+Tilda iframe URL o'zgarmaydi:
 
 `https://ijro-nazorati-backend.onrender.com/app`
 
-## Tekshirish
+## Tekshirish ketma-ketligi
 
-1. `/health`
-2. `/api/telegram/webhook-info`
-3. `/api/soliq-monitor/summary`
-4. Rahbar paneli → `Soliq Monitoring`
-5. `+ Xabarni qo'lda import/test` orqali real bot xabarini sinang.
+1. Supabase Stage 8.4.2 SQL → Success.
+2. Render ENV secretni kiriting.
+3. Render deploy.
+4. `/api/integrations/soliq-monitor/health` endpointini Soliq Monitor'dagi `Ulanishni tekshirish` tugmasi bilan tekshiring.
+5. Bitta korxonada qabul qilingan hisobotni test qiling.
+6. Bitta korxonada kod `46` va `36` to'lovlarini test qiling.
+7. Nazorat jadvalida ikkala to'lovdan keyin `✓ Tasdiqlandi · AUTO` chiqishini tekshiring.
 
-Birinchi testda 1 ta korxona va 1 ta hisobotdan boshlash tavsiya qilinadi. Import jurnalida korxona, nazorat bandi, topshiriq va `AUTO tasdiqlandi` natijasi to'g'ri chiqqach, umumiy oqim yoqiladi.
+## Muhim
+
+Direct API asosiy kanal. Telegramni o'chirish shart emas: u rahbar uchun ko'rinadigan parallel jurnal va fallback bo'lib qoladi.
