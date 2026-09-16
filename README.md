@@ -1,5 +1,10 @@
-# Ijro Nazorati — Stage 8.4.1
-## My Soliq Monitoring Integration
+# Ijro Nazorati — Stage 8.4.1 Hotfix 2
+## My Soliq Monitoring Integration → AUTO Nazorat tasdig‘i
+
+> **Stage 8.4.1 Hotfix 2 — AUTO Tasdiqlandi:** My Soliq Monitoring'da hisobot `Qabul qilingan` / `Qabul qilingan o'z vaqtida` bo'lsa, mos Nazorat jadvali katagi avtomatik `Direktor tasdiqladi` holatiga o'tadi. Mas'ul boshqa xodim bo'lsa ham u qayta biriktirilmaydi; faqat bajarilganlik faktik tasdiqlanadi. Nazorat oyi default bo'yicha **jo'natilgan sana oyi**dan olinadi (masalan Avgust hisoboti 11.09.2026 da yuborilgan bo'lsa Sentabr Nazorat jadvalida tasdiqlanadi). Oldingi importlar uchun `Qabul qilinganlarni Nazorat jadvaliga sinxronlash` tugmasi qo'shildi. Hotfix 1 (`req is not defined`) ham saqlangan.
+
+> **Stage 8.4.1 Hotfix 1 (bootstrap fix):** `/api/bootstrap` route ichida request parametri `_` deb nomlangan, lekin kodda `req.query` ishlatilgan edi. Shu sabab login'dan keyin `req is not defined` xatosi chiqardi. Hotfix'da route `(req, res)` qilib tuzatildi. Supabase schema yoki ma'lumotlarga o'zgarish kiritilmaydi.
+
 
 Stage 8.4.1 Stage 8.4 ustiga qurilgan. Oldingi ma'lumotlar o'chirilmaydi. Integratsiya uchun yangi jadvallar **qo'shiladi**, mavjud `companies`, `tasks`, `task_history`, `app_users` jadvallari saqlanadi.
 
@@ -18,16 +23,13 @@ Stage 8.4.1 Stage 8.4 ustiga qurilgan. Oldingi ma'lumotlar o'chirilmaydi. Integr
 - Rahbar panelida alohida **Soliq Monitoring** bo'limi: statistika, import jurnali, mappinglar, qayta ishlash va qo'lda test/import.
 - Elektron HTML arxivga monitoring importlari va mappinglari ham qo'shildi.
 
-## Muhim ishlash qoidasi
+## Muhim ishlash qoidasi — Hotfix 2
 
-Tashqi bot xabari hisobotni kim topshirganini ko'rsatmasa, platforma xodimni taxmin qilmaydi. Avtomatik yopish faqat:
-
-1. mavjud topshiriq ruxsat etilgan xodimga (default: `Zohidjon`) biriktirilgan bo'lsa; yoki
-2. `SOLIQ_MONITOR_CREATE_MISSING_TASK=true` bo'lsa va platformada ruxsat etilgan faol xodim topilsa
-
-amalga oshadi.
-
-Agar shu korxona/band topshirig'i boshqa xodimga biriktirilgan bo'lsa, import jurnalida `Boshqa xodimga biriktirilgan` deb qoladi va avtomatik yopilmaydi.
+- Tashqi status `Qabul qilingan`, `Qabul qilingan o'z vaqtida` yoki `Qabul qilingan, kechikib` bo'lsa — mos Nazorat topshirig'i **avtomatik tasdiqlanadi**.
+- Topshiriq boshqa xodimga biriktirilgan bo'lsa ham mas'ul o'zgarmaydi; `Direktor tasdiqladi` statusi qo'yiladi.
+- Default Nazorat oyi: `sent_month`. Hisobot davri Avgust, jo'natilgan sana Sentabr bo'lsa — Sentabr jadvaliga tushadi.
+- Mapping topilmasa avtomatik tasdiqlash bo'lmaydi; rahbar `Mappinglar` orqali bog'laydi.
+- Oldin import qilingan qabul qilingan yozuvlar uchun Soliq Monitoring bo'limidagi **Qabul qilinganlarni Nazorat jadvaliga sinxronlash** tugmasini bir marta bosing.
 
 ## Supabase migration — MAJBURIY
 
@@ -58,6 +60,9 @@ SOLIQ_MONITOR_CREATE_MISSING_TASK=true
 SOLIQ_MONITOR_NOTIFY_PROBLEMS=true
 SOLIQ_MONITOR_NOTIFY_CUSTOMER=false
 SOLIQ_MONITOR_ALLOW_USER_FORWARD=true
+SOLIQ_MONITOR_CONTROL_MONTH_MODE=sent_month
+SOLIQ_MONITOR_ACCEPTED_SYNC_ANY_ASSIGNEE=true
+SOLIQ_MONITOR_CONTROL_TIMEZONE=Asia/Tashkent
 ```
 
 Xavfsizlik uchun monitoring xabarlari keladigan maxsus Telegram guruhni cheklash tavsiya qilinadi:

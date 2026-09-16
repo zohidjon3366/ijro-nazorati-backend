@@ -75,6 +75,11 @@ const SOLIQ_MONITOR_AUTO_STATUS = cleanEnvStatus(process.env.SOLIQ_MONITOR_AUTO_
 const SOLIQ_MONITOR_CREATE_MISSING_TASK = envBoolEarly(process.env.SOLIQ_MONITOR_CREATE_MISSING_TASK, true);
 const SOLIQ_MONITOR_NOTIFY_PROBLEMS = envBoolEarly(process.env.SOLIQ_MONITOR_NOTIFY_PROBLEMS, true);
 const SOLIQ_MONITOR_NOTIFY_CUSTOMER = envBoolEarly(process.env.SOLIQ_MONITOR_NOTIFY_CUSTOMER, false);
+// Hotfix 2: qabul qilingan tashqi hisobot Nazorat jadvalini fakt bo'yicha tasdiqlaydi.
+// sent_month = hisobot qaysi oy uchun ekanidan qat'i nazar, real jo'natilgan oy Nazorat jadvali oyi hisoblanadi.
+const SOLIQ_MONITOR_CONTROL_MONTH_MODE = String(process.env.SOLIQ_MONITOR_CONTROL_MONTH_MODE || 'sent_month').trim().toLowerCase();
+const SOLIQ_MONITOR_CONTROL_TIMEZONE = String(process.env.SOLIQ_MONITOR_CONTROL_TIMEZONE || TELEGRAM_TIMEZONE || 'Asia/Tashkent').trim();
+const SOLIQ_MONITOR_ACCEPTED_SYNC_ANY_ASSIGNEE = envBoolEarly(process.env.SOLIQ_MONITOR_ACCEPTED_SYNC_ANY_ASSIGNEE, true);
 const SOLIQ_MONITOR_IMPORT_SECRET = String(process.env.SOLIQ_MONITOR_IMPORT_SECRET || '').trim();
 
 function splitEnvList(raw) { return String(raw || '').split(',').map(x => x.trim()).filter(Boolean); }
@@ -2486,6 +2491,27 @@ function monitoringStatusGroup(status) {
   if (n.includes('tekshiril') || n.includes('kutil') || n.includes('pending') || n.includes('jarayon')) return 'pending';
   return 'unknown';
 }
+function monitoringMonthFromIso(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: SOLIQ_MONITOR_CONTROL_TIMEZONE, year:'numeric', month:'2-digit' }).formatToParts(d);
+    const y = parts.find(x => x.type === 'year')?.value;
+    const m = parts.find(x => x.type === 'month')?.value;
+    return y && m ? `${y}-${m}` : '';
+  } catch (_) {
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
+  }
+}
+function monitoringControlMonth(report = {}) {
+  if (SOLIQ_MONITOR_CONTROL_MONTH_MODE === 'report_period') return report.period || monitoringMonthFromIso(report.sentAt) || monitoringMonthFromIso(report.checkedAt);
+  // Default: Nazorat jadvali bajarish/topshirish oyini ko'rsatadi. Masalan Avgust hisoboti 11-sentabrda topshirilsa -> Sentabr jadvali.
+  return monitoringMonthFromIso(report.sentAt) || monitoringMonthFromIso(report.checkedAt) || report.period || '';
+}
+function monitoringAcceptedGroup(group) {
+  return ['accepted_on_time','accepted','accepted_late'].includes(String(group || ''));
+}
 function parseSoliqMonitoringText(text) {
   const raw = String(text || '').replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim();
   if (!raw) return null;
@@ -2643,9 +2669,9 @@ function monitoringDefaultDeadline(period, item) {
 async function createMonitoringTask(company, item, period, assignee, report) {
   const actorId = await defaultActorId().catch(()=>null);
   const marker = monitoringControlMarker(period, item);
-  const note = `${marker}\nTashqi holat: ${report.status || '-'}\nJo‘natilgan: ${report.sentRaw || report.sentAt || '-'}\nTekshirilgan: ${report.checkedRaw || report.checkedAt || '-'}`;
+  const note = `${marker}\nHisobot davri: ${report.period || report.periodRaw || '-'}\nTashqi holat: ${report.status || '-'}\nJo‘natilgan: ${report.sentRaw || report.sentAt || '-'}\nTekshirilgan: ${report.checkedRaw || report.checkedAt || '-'}`;
   const payload = {
-    company_id: company.id, assignee_id: assignee.id, template_id: null,
+    company_id: company.id, assignee_id: assignee?.id || null, template_id: null,
     title: `[Nazorat] ${item.name} — ${company.name}`, type: item.name,
     deadline: monitoringDefaultDeadline(period, item), priority: 'Muhim', status: 'Yangi',
     description: `My Soliq Monitoring orqali aniqlangan nazorat topshirig‘i. Davr: ${period}.`,
@@ -2732,28 +2758,41 @@ async function processMonitoringReport(meta, parsed, report, { force = false } =
     if (!company) return { import: await updateMonitoringImport(row.id, { auto_action:'company_not_found', error_message:`STIR ${parsed.tin} bo‘yicha korxona topilmadi` }) };
     const { item, mapping } = await matchMonitoringControlItem(report.name);
     if (!item) return { import: await updateMonitoringImport(row.id, { matched_company_id:company.id, auto_action:'mapping_not_found', error_message:'Hisobot Nazorat jadvali bandiga mapping qilinmadi' }) };
-    let task = await findMonitoringTask(company.id, item, report.period);
+
+    // Nazorat jadvali oyi default bo'yicha real topshirilgan sana oyidan olinadi.
+    // Masalan: 2026/Avgust hisobot 11.09.2026 da topshirilgan -> 2026-09 Nazorat jadvali.
+    const controlMonth = monitoringControlMonth(report);
+    let task = await findMonitoringTask(company.id, item, controlMonth);
     let assignee = task?.assignee_id ? await getById('app_users', task.assignee_id).catch(()=>null) : null;
     let created = false;
-    if (!task && SOLIQ_MONITOR_CREATE_MISSING_TASK && report.period) {
+    if (!task && SOLIQ_MONITOR_CREATE_MISSING_TASK && controlMonth) {
       assignee = await monitoringDefaultAssignee();
-      if (assignee) { task = await createMonitoringTask(company, item, report.period, assignee, report); created = true; }
+      // Qabul qilingan fakt Nazorat jadvalida aks etishi uchun default xodim topilmasa ham tizim topshirig'ini assigneesiz yarata oladi.
+      task = await createMonitoringTask(company, item, controlMonth, assignee, report);
+      created = true;
     }
-    if (!task) return { import: await updateMonitoringImport(row.id, { matched_company_id:company.id, matched_control_item_id:item.id, matched_control_item_name:item.name, mapping_id:mapping?.id || null, auto_action:'task_not_found', error_message:'Mos nazorat topshirig‘i topilmadi' }) };
-    if (!assignee) assignee = await getById('app_users', task.assignee_id).catch(()=>null);
+    if (!task) return { import: await updateMonitoringImport(row.id, { matched_company_id:company.id, matched_control_item_id:item.id, matched_control_item_name:item.name, mapping_id:mapping?.id || null, auto_action:'task_not_found', error_message:`Mos nazorat topshirig‘i topilmadi (Nazorat oyi: ${controlMonth || '-'})` }) };
+    if (!assignee && task.assignee_id) assignee = await getById('app_users', task.assignee_id).catch(()=>null);
     const common = { matched_company_id:company.id, matched_control_item_id:item.id, matched_control_item_name:item.name, mapping_id:mapping?.id || null, matched_task_id:task.id, assignee_id:assignee?.id || null };
-    if (!monitoringAssigneeAllowed(assignee)) {
-      return { import: await updateMonitoringImport(row.id, { ...common, auto_action:'assignee_mismatch', error_message:`Topshiriq ${assignee?.full_name || 'boshqa xodim'}ga biriktirilgan; Zohidjon sifatida avtomatik yopilmadi` }) };
-    }
-    if (['accepted_on_time','accepted','accepted_late'].includes(report.statusGroup)) {
+
+    // Hotfix 2: My Soliq tashqi manbada hisobot qabul qilingan bo'lsa, bu bajarilganlikning faktik tasdig'i.
+    // Shuning uchun topshiriq kimga biriktirilganidan qat'i nazar Nazorat jadvalida Tasdiqlandi bo'ladi; mas'ul xodim o'zgartirilmaydi.
+    if (monitoringAcceptedGroup(report.statusGroup)) {
+      if (!SOLIQ_MONITOR_ACCEPTED_SYNC_ANY_ASSIGNEE && !monitoringAssigneeAllowed(assignee)) {
+        return { import: await updateMonitoringImport(row.id, { ...common, auto_action:'assignee_mismatch', error_message:`Topshiriq ${assignee?.full_name || 'boshqa xodim'}ga biriktirilgan; ENV bo‘yicha avtomatik tasdiqlash cheklangan` }) };
+      }
       const done = await autoCompleteMonitoringTask(task, report);
-      return { import: await updateMonitoringImport(row.id, { ...common, auto_action: created ? `created_${done.action}` : done.action, error_message: report.statusGroup === 'accepted_late' ? 'Hisobot qabul qilingan, lekin kechikib topshirilgan' : null }), task: done.task };
+      const lateNote = report.statusGroup === 'accepted_late' ? 'Hisobot qabul qilingan, lekin kechikib topshirilgan' : null;
+      const syncNote = controlMonth && report.period && controlMonth !== report.period ? `Hisobot davri ${report.period}; Nazorat jadvali oyi ${controlMonth} (jo‘natilgan sana bo‘yicha)` : null;
+      return { import: await updateMonitoringImport(row.id, { ...common, auto_action: created ? `created_${done.action}` : done.action, error_message: [lateNote, syncNote].filter(Boolean).join(' · ') || null }), task: done.task, controlMonth };
     }
+
+    // Muammoli hisobot bo'lsa aynan biriktirilgan xodim va direktor ogohlantiriladi.
     if (report.statusGroup === 'problem') {
       await notifyMonitoringProblem({ company, task, assignee, report });
-      return { import: await updateMonitoringImport(row.id, { ...common, auto_action:'problem_notified', error_message:report.status || 'Muammoli holat' }) };
+      return { import: await updateMonitoringImport(row.id, { ...common, auto_action:'problem_notified', error_message:report.status || 'Muammoli holat' }), controlMonth };
     }
-    return { import: await updateMonitoringImport(row.id, { ...common, auto_action:'no_status_action', error_message:'Tashqi holat avtomatik yopish uchun yetarli emas' }) };
+    return { import: await updateMonitoringImport(row.id, { ...common, auto_action:'no_status_action', error_message:`Tashqi holat avtomatik yopish uchun yetarli emas. Nazorat oyi: ${controlMonth || '-'}` }), controlMonth };
   } catch (err) {
     await updateMonitoringImport(row.id, { auto_action:'error', error_message:err.message || 'Import xatosi' }).catch(()=>{});
     throw err;
@@ -2790,9 +2829,41 @@ app.get('/api/soliq-monitor/summary', async (req, res) => {
     if (totalRes.error) throw totalRes.error;
     const counts = Object.fromEntries(groups.map((g,i)=>[g, groupRes[i]?.count || 0]));
     const { count: unmatched = 0 } = await supabase.from('monitoring_imports').select('id',{count:'exact',head:true}).gte('created_at',since).is('matched_task_id',null);
-    return res.json({ ok:true, data:{ enabled:SOLIQ_MONITOR_ENABLED, periodDays:30, total:totalRes.count||0, ...counts, unmatched, autoStatus:SOLIQ_MONITOR_AUTO_STATUS, createMissingTask:SOLIQ_MONITOR_CREATE_MISSING_TASK, autoAssigneeNames:SOLIQ_MONITOR_AUTO_ASSIGNEE_NAMES } });
+    return res.json({ ok:true, data:{ enabled:SOLIQ_MONITOR_ENABLED, periodDays:30, total:totalRes.count||0, ...counts, unmatched, autoStatus:SOLIQ_MONITOR_AUTO_STATUS, createMissingTask:SOLIQ_MONITOR_CREATE_MISSING_TASK, autoAssigneeNames:SOLIQ_MONITOR_AUTO_ASSIGNEE_NAMES, controlMonthMode:SOLIQ_MONITOR_CONTROL_MONTH_MODE, acceptedSyncAnyAssignee:SOLIQ_MONITOR_ACCEPTED_SYNC_ANY_ASSIGNEE } });
   } catch (err) { return handleError(res, err); }
 });
+app.post('/api/soliq-monitor/sync-accepted', async (req, res) => {
+  try {
+    ensureDb();
+    const limit = Math.min(2000, Math.max(10, Number(req.body?.limit || 1000)));
+    const { data, error } = await supabase.from('monitoring_imports').select('*')
+      .in('status_group', ['accepted_on_time','accepted','accepted_late'])
+      .order('created_at', { ascending:false }).limit(limit);
+    if (error) throw error;
+    const unique = new Map();
+    for (const row of data || []) {
+      if (!row.raw_text) continue;
+      const key = `${row.source || ''}|${row.source_chat_id || ''}|${row.source_message_id || ''}|${createHash('sha1').update(String(row.raw_text)).digest('hex')}`;
+      if (!unique.has(key)) unique.set(key, row);
+    }
+    let messages = 0, reports = 0, failed = 0;
+    const errors = [];
+    for (const row of unique.values()) {
+      try {
+        const result = await processSoliqMonitoringText(row.raw_text, {
+          source:row.source || 'resync', chatId:row.source_chat_id || '', messageId:row.source_message_id || row.id,
+          senderId:row.source_sender_id || '', rawPayload:row.raw_payload || {}
+        }, { force:true });
+        if (result?.handled) { messages++; reports += Number(result.reports || 0); }
+      } catch (err) {
+        failed++; if (errors.length < 10) errors.push(err.message || String(err));
+      }
+    }
+    invalidateBootstrapCache();
+    return res.json({ ok:true, messages, reports, failed, errors, controlMonthMode:SOLIQ_MONITOR_CONTROL_MONTH_MODE });
+  } catch (err) { return handleError(res, err); }
+});
+
 app.get('/api/soliq-monitor/imports', async (req, res) => {
   try {
     ensureDb();
