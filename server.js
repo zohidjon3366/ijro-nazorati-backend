@@ -22,14 +22,20 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '5mb' }));
 
-// Stage 7.5 iframe mode: serve the full web app from Render so Tilda T123 only needs a tiny iframe code.
-// This does not change Supabase database structure.
-app.get(['/app', '/app/', '/ijro', '/ijro/'], (req, res) => {
+// Stage 8.4.3 — Render Standalone mode.
+// The application is served directly by Render/custom domain; Tilda/iframe is not required.
+function serveIjroApp(req, res) {
   const seconds = Math.max(0, Number(process.env.APP_HTML_CACHE_SECONDS || 60));
   res.setHeader('Cache-Control', seconds ? `public, max-age=${seconds}, stale-while-revalidate=300` : 'no-cache');
-  res.setHeader('X-Ijro-Stage', '8.4.1');
+  res.setHeader('X-Ijro-Stage', '8.4.3-render-standalone');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
   return res.sendFile(APP_HTML_PATH);
-});
+}
+app.get(['/', '/app', '/app/', '/ijro', '/ijro/'], serveIjroApp);
+app.get('/favicon.ico', (_, res) => res.status(204).end());
 
 
 const upload = multer({
@@ -1137,7 +1143,7 @@ function handleError(res, err) {
   return res.status(status).json({ ok: false, error: err.message || 'Server xatosi', details: err.details || null });
 }
 
-app.get('/health', (_, res) => res.json({ ok: true, supabase: !!supabase, time: new Date().toISOString() }));
+app.get('/health', (_, res) => res.json({ ok: true, stage: '8.4.3-render-standalone', mode: 'render-standalone', supabase: !!supabase, time: new Date().toISOString() }));
 
 app.get('/api/performance', async (req, res) => {
   try {
@@ -3241,7 +3247,7 @@ app.get('/api/integrations/soliq-monitor/health', async (req,res)=>{
     if (!monitorImportSecretAllowed(req)) return res.status(401).json({ok:false,error:'Unauthorized'});
     ensureDb();
     const [maps,taxMaps,diagnostics]=await Promise.all([monitoringMappings().catch(()=>[]),monitoringTaxMappings().catch(()=>[]),soliqMonitorDiagnostics()]);
-    return res.json({ok:true,stage:'8.4.2-hotfix3',integration:'Unified Soliq Integration',directApi:true,reportMappings:maps.length,taxMappings:taxMaps.length,...diagnostics,serverTime:new Date().toISOString()});
+    return res.json({ok:true,stage:'8.4.3-render-standalone',integration:'Unified Soliq Integration',directApi:true,reportMappings:maps.length,taxMappings:taxMaps.length,...diagnostics,serverTime:new Date().toISOString()});
   } catch(err){ return handleError(res,err); }
 });
 app.post('/api/integrations/soliq-monitor/probe', async (req,res)=>{
@@ -3250,7 +3256,7 @@ app.post('/api/integrations/soliq-monitor/probe', async (req,res)=>{
     ensureDb();
     const diagnostics=await soliqMonitorDiagnostics();
     console.log(`[Soliq Direct Sync] PROBE accepted; direct30d=${diagnostics.directApiCount30d}; last=${diagnostics.lastDirectAt || '-'}`);
-    return res.json({ok:true,stage:'8.4.2-hotfix3',probe:true,...diagnostics,serverTime:new Date().toISOString()});
+    return res.json({ok:true,stage:'8.4.3-render-standalone',probe:true,...diagnostics,serverTime:new Date().toISOString()});
   } catch(err){ return handleError(res,err); }
 });
 app.post('/api/integrations/soliq-monitor/events', async (req,res)=>{
@@ -3296,5 +3302,5 @@ app.delete('/api/soliq-monitor/tax-mappings/:id', async(req,res)=>{
 
 
 app.listen(PORT, () => {
-  console.log(`Ijro nazorati backend Stage 8.4.2 Hotfix 3 running on port ${PORT}`);
+  console.log(`Ijro nazorati Stage 8.4.3 Render Standalone running on port ${PORT}`);
 });

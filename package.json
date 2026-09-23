@@ -1,6 +1,6 @@
 {
-  "name": "tilda-ijro-nazorati-backend-stage8-4-2",
-  "version": "8.4.2",
+  "name": "all-finance-ijro-nazorati",
+  "version": "8.4.3",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -16,5 +16,5 @@
     "multer": "^1.4.5-lts.1",
     "compression": "^1.7.4"
   },
-  "description": "Ijro Nazorati Stage 8.4.2: Unified Soliq Integration, direct Soliq Monitor API, accepted reports and tax payment auto-control."
+  "description": "ALL FINANCE KPI / Ijro Nazorati Stage 8.4.3 — Render Standalone with Unified Soliq Integration."
 }
