@@ -2825,6 +2825,29 @@ function monitorImportSecretAllowed(req) {
   if (!SOLIQ_MONITOR_IMPORT_SECRET) return true;
   return String(req.headers['x-soliq-monitor-secret'] || req.body?.secret || '') === SOLIQ_MONITOR_IMPORT_SECRET;
 }
+async function soliqMonitorDiagnostics() {
+  const since = new Date(Date.now() - 30*24*60*60*1000).toISOString();
+  const [directCountRes, latestDirectRes, latestAnyRes] = await Promise.all([
+    supabase.from('monitoring_imports').select('id',{count:'exact',head:true}).gte('created_at',since).eq('source','direct_api'),
+    supabase.from('monitoring_imports').select('created_at,company_tin,company_name_raw,event_type,auto_action,error_message,status_group').eq('source','direct_api').order('created_at',{ascending:false}).limit(1).maybeSingle(),
+    supabase.from('monitoring_imports').select('created_at,source,company_tin,event_type,auto_action,error_message').order('created_at',{ascending:false}).limit(1).maybeSingle()
+  ]);
+  if (directCountRes.error) throw directCountRes.error;
+  if (latestDirectRes.error) throw latestDirectRes.error;
+  if (latestAnyRes.error) throw latestAnyRes.error;
+  return {
+    directApiCount30d: directCountRes.count || 0,
+    lastDirectAt: latestDirectRes.data?.created_at || null,
+    lastDirectTin: latestDirectRes.data?.company_tin || null,
+    lastDirectCompany: latestDirectRes.data?.company_name_raw || null,
+    lastDirectEventType: latestDirectRes.data?.event_type || null,
+    lastDirectAction: latestDirectRes.data?.auto_action || null,
+    lastDirectError: latestDirectRes.data?.error_message || null,
+    lastDirectStatusGroup: latestDirectRes.data?.status_group || null,
+    lastImportAt: latestAnyRes.data?.created_at || null,
+    lastImportSource: latestAnyRes.data?.source || null
+  };
+}
 app.get('/api/soliq-monitor/summary', async (req, res) => {
   try {
     ensureDb();
@@ -2835,7 +2858,8 @@ app.get('/api/soliq-monitor/summary', async (req, res) => {
     if (totalRes.error) throw totalRes.error;
     const counts = Object.fromEntries(groups.map((g,i)=>[g, groupRes[i]?.count || 0]));
     const { count: unmatched = 0 } = await supabase.from('monitoring_imports').select('id',{count:'exact',head:true}).gte('created_at',since).is('matched_task_id',null);
-    return res.json({ ok:true, data:{ enabled:SOLIQ_MONITOR_ENABLED, periodDays:30, total:totalRes.count||0, ...counts, unmatched, autoStatus:SOLIQ_MONITOR_AUTO_STATUS, createMissingTask:SOLIQ_MONITOR_CREATE_MISSING_TASK, autoAssigneeNames:SOLIQ_MONITOR_AUTO_ASSIGNEE_NAMES, controlMonthMode:SOLIQ_MONITOR_CONTROL_MONTH_MODE, acceptedSyncAnyAssignee:SOLIQ_MONITOR_ACCEPTED_SYNC_ANY_ASSIGNEE } });
+    const diagnostics = await soliqMonitorDiagnostics();
+    return res.json({ ok:true, data:{ enabled:SOLIQ_MONITOR_ENABLED, periodDays:30, total:totalRes.count||0, ...counts, unmatched, ...diagnostics, autoStatus:SOLIQ_MONITOR_AUTO_STATUS, createMissingTask:SOLIQ_MONITOR_CREATE_MISSING_TASK, autoAssigneeNames:SOLIQ_MONITOR_AUTO_ASSIGNEE_NAMES, controlMonthMode:SOLIQ_MONITOR_CONTROL_MONTH_MODE, acceptedSyncAnyAssignee:SOLIQ_MONITOR_ACCEPTED_SYNC_ANY_ASSIGNEE } });
   } catch (err) { return handleError(res, err); }
 });
 app.post('/api/soliq-monitor/sync-accepted', async (req, res) => {
@@ -3190,8 +3214,17 @@ app.get('/api/integrations/soliq-monitor/health', async (req,res)=>{
   try {
     if (!monitorImportSecretAllowed(req)) return res.status(401).json({ok:false,error:'Unauthorized'});
     ensureDb();
-    const [maps,taxMaps]=await Promise.all([monitoringMappings().catch(()=>[]),monitoringTaxMappings().catch(()=>[])]);
-    return res.json({ok:true,stage:'8.4.2',integration:'Unified Soliq Integration',directApi:true,reportMappings:maps.length,taxMappings:taxMaps.length,serverTime:new Date().toISOString()});
+    const [maps,taxMaps,diagnostics]=await Promise.all([monitoringMappings().catch(()=>[]),monitoringTaxMappings().catch(()=>[]),soliqMonitorDiagnostics()]);
+    return res.json({ok:true,stage:'8.4.2-hotfix1',integration:'Unified Soliq Integration',directApi:true,reportMappings:maps.length,taxMappings:taxMaps.length,...diagnostics,serverTime:new Date().toISOString()});
+  } catch(err){ return handleError(res,err); }
+});
+app.post('/api/integrations/soliq-monitor/probe', async (req,res)=>{
+  try {
+    if (!monitorImportSecretAllowed(req)) return res.status(401).json({ok:false,error:'Unauthorized'});
+    ensureDb();
+    const diagnostics=await soliqMonitorDiagnostics();
+    console.log(`[Soliq Direct Sync] PROBE accepted; direct30d=${diagnostics.directApiCount30d}; last=${diagnostics.lastDirectAt || '-'}`);
+    return res.json({ok:true,stage:'8.4.2-hotfix1',probe:true,...diagnostics,serverTime:new Date().toISOString()});
   } catch(err){ return handleError(res,err); }
 });
 app.post('/api/integrations/soliq-monitor/events', async (req,res)=>{
@@ -3201,9 +3234,19 @@ app.post('/api/integrations/soliq-monitor/events', async (req,res)=>{
     const events=Array.isArray(req.body?.events)?req.body.events:[req.body];
     if (!events.length || !events[0]) return res.status(400).json({ok:false,error:'Event kerak'});
     const results=[];
-    for (const event of events.slice(0,200)) results.push(await processDirectSoliqEvent(event));
-    return res.json({ok:true,processed:results.length,results});
-  } catch(err){ return handleError(res,err); }
+    for (const event of events.slice(0,200)) {
+      const eventId=directEventId(event);
+      const type=cleanText(event?.event_type||event?.type||'');
+      const tin=directEventCompany(event).tin;
+      console.log(`[Soliq Direct Sync] IN event=${type || '-'} tin=${tin || '-'} id=${eventId.slice(0,12)}`);
+      const processed=await processDirectSoliqEvent(event);
+      results.push(processed);
+      const imp=processed?.result?.import || processed?.result?.result?.import || null;
+      console.log(`[Soliq Direct Sync] OUT event=${type || '-'} tin=${tin || '-'} action=${imp?.auto_action || '-'} error=${imp?.error_message || '-'}`);
+    }
+    const diagnostics=await soliqMonitorDiagnostics();
+    return res.json({ok:true,processed:results.length,results,diagnostics});
+  } catch(err){ console.error('[Soliq Direct Sync] ERROR', err); return handleError(res,err); }
 });
 app.get('/api/soliq-monitor/tax-mappings', async (req,res)=>{
   try { ensureDb(); const {data,error}=await supabase.from('monitoring_tax_mappings').select('*').order('priority',{ascending:true}).order('created_at',{ascending:true}); if(error) throw error; return res.json({ok:true,data:data||[]}); }
@@ -3227,5 +3270,5 @@ app.delete('/api/soliq-monitor/tax-mappings/:id', async(req,res)=>{
 
 
 app.listen(PORT, () => {
-  console.log(`Ijro nazorati backend Stage 8.4.2 running on port ${PORT}`);
+  console.log(`Ijro nazorati backend Stage 8.4.2 Hotfix 1 running on port ${PORT}`);
 });

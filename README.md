@@ -106,3 +106,11 @@ Tilda iframe URL o'zgarmaydi:
 ## Muhim
 
 Direct API asosiy kanal. Telegramni o'chirish shart emas: u rahbar uchun ko'rinadigan parallel jurnal va fallback bo'lib qoladi.
+
+## Stage 8.4.2 Hotfix 1 — Direct Sync diagnostika
+
+- Ijro Nazorati → Soliq Monitoring sahifasida Direct API qabul soni va oxirgi event ko‘rinadi.
+- `POST /api/integrations/soliq-monitor/probe` server + secret + Supabase aloqasini tekshiradi.
+- Render logida har event uchun `[Soliq Direct Sync] IN` va `OUT` yozuvlari chiqadi.
+- Direct event kelmagan bo‘lsa UI aniq ogohlantiradi.
+- Supabase SQL qayta bajarilishi shart emas.
