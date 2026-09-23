@@ -122,3 +122,6 @@ Direct API asosiy kanal. Telegramni o'chirish shart emas: u rahbar uchun ko'rina
 - Direct API event_id bo‘yicha idempotent; takror event yangi amal yaratmaydi.
 - Frontend jurnalida Nazorat oyi va Hisobot davri alohida ko‘rsatiladi.
 - Supabase uchun qo‘shimcha migratsiya talab qilinmaydi.
+
+## Stage 8.4.2 Hotfix 3
+Accepted report status normalization fixed for Cyrillic Uzbek portal values. Existing Direct API accepted-report imports that were stored as `unknown` can be recovered using the Soliq Monitoring button **Qabul qilingan hisobotlarni qayta sinxronlash**. No new Supabase migration is required.

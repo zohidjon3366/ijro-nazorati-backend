@@ -2868,31 +2868,49 @@ app.post('/api/soliq-monitor/sync-accepted', async (req, res) => {
   try {
     ensureDb();
     const limit = Math.min(2000, Math.max(10, Number(req.body?.limit || 1000)));
+    // Hotfix 3: oldingi Direct Sync bugida kirillcha qabul statuslari unknown bo‘lib saqlangan.
+    // Shuning uchun accepted_report yozuvlarini event_type bo‘yicha olib, external_statusni ham qayta baholaymiz.
     const { data, error } = await supabase.from('monitoring_imports').select('*')
-      .in('status_group', ['accepted_on_time','accepted','accepted_late'])
+      .eq('event_type', 'accepted_report')
       .order('created_at', { ascending:false }).limit(limit);
     if (error) throw error;
+    const rows = (data || []).filter(row =>
+      monitoringAcceptedGroup(row.status_group) || monitoringAcceptedGroup(monitoringStatusGroup(row.external_status || ''))
+    );
+
+    let messages = 0, reports = 0, failed = 0, direct = 0, telegram = 0;
+    const errors = [];
+
+    // Direct API yozuvlari har bir hisobot uchun alohida raw_payload saqlaydi.
+    for (const row of rows.filter(r => String(r.source || '') === 'direct_api' && r.raw_payload && typeof r.raw_payload === 'object')) {
+      try {
+        await processDirectSoliqEvent(row.raw_payload, { force:true });
+        messages++; reports++; direct++;
+      } catch (err) {
+        failed++; if (errors.length < 10) errors.push(err.message || String(err));
+      }
+    }
+
+    // Telegram/manual eski importlar bir xabarda bir nechta hisobot bo‘lishi mumkin.
     const unique = new Map();
-    for (const row of data || []) {
+    for (const row of rows.filter(r => String(r.source || '') !== 'direct_api')) {
       if (!row.raw_text) continue;
       const key = `${row.source || ''}|${row.source_chat_id || ''}|${row.source_message_id || ''}|${createHash('sha1').update(String(row.raw_text)).digest('hex')}`;
       if (!unique.has(key)) unique.set(key, row);
     }
-    let messages = 0, reports = 0, failed = 0;
-    const errors = [];
     for (const row of unique.values()) {
       try {
         const result = await processSoliqMonitoringText(row.raw_text, {
           source:row.source || 'resync', chatId:row.source_chat_id || '', messageId:row.source_message_id || row.id,
           senderId:row.source_sender_id || '', rawPayload:row.raw_payload || {}
         }, { force:true });
-        if (result?.handled) { messages++; reports += Number(result.reports || 0); }
+        if (result?.handled) { messages++; reports += Number(result.reports || 0); telegram++; }
       } catch (err) {
         failed++; if (errors.length < 10) errors.push(err.message || String(err));
       }
     }
     invalidateBootstrapCache();
-    return res.json({ ok:true, messages, reports, failed, errors, controlMonthMode:SOLIQ_MONITOR_CONTROL_MONTH_MODE });
+    return res.json({ ok:true, messages, reports, direct, telegram, failed, errors, controlMonthMode:'execution_month' });
   } catch (err) { return handleError(res, err); }
 });
 
@@ -3019,10 +3037,16 @@ function structuredReportFromEvent(event) {
   const sentAt = d.sent_at && /^20\d{2}-/.test(String(d.sent_at)) ? String(d.sent_at) : monitorDateIso(sentRaw);
   const checkedAt = d.checked_at && /^20\d{2}-/.test(String(d.checked_at)) ? String(d.checked_at) : monitorDateIso(checkedRaw);
   const status = cleanText(d.external_status || d.status || '');
+  // Defensive normalization: eski Soliq Monitor versiyasi kirillcha
+  // «Қабул қилинган ўз вақтида» holatini status_group=unknown deb yuborgan.
+  // unknown/unrecognized guruh tashqi statusdan qayta hisoblanadi.
+  const suppliedGroup = cleanText(d.status_group || '');
+  const validGroups = new Set(['accepted_on_time','accepted','accepted_late','problem','pending']);
+  const statusGroup = validGroups.has(suppliedGroup) ? suppliedGroup : monitoringStatusGroup(status);
   return {
     name: cleanText(d.name || d.report_name || ''), periodRaw, period,
     sentAt: sentAt || null, sentRaw: sentRaw || String(d.sent_at || ''), status,
-    statusGroup: cleanText(d.status_group || '') || monitoringStatusGroup(status),
+    statusGroup,
     checkedAt: checkedAt || null, checkedRaw: checkedRaw || String(d.checked_at || ''),
     rawBlock: JSON.stringify(d)
   };
@@ -3217,7 +3241,7 @@ app.get('/api/integrations/soliq-monitor/health', async (req,res)=>{
     if (!monitorImportSecretAllowed(req)) return res.status(401).json({ok:false,error:'Unauthorized'});
     ensureDb();
     const [maps,taxMaps,diagnostics]=await Promise.all([monitoringMappings().catch(()=>[]),monitoringTaxMappings().catch(()=>[]),soliqMonitorDiagnostics()]);
-    return res.json({ok:true,stage:'8.4.2-hotfix2',integration:'Unified Soliq Integration',directApi:true,reportMappings:maps.length,taxMappings:taxMaps.length,...diagnostics,serverTime:new Date().toISOString()});
+    return res.json({ok:true,stage:'8.4.2-hotfix3',integration:'Unified Soliq Integration',directApi:true,reportMappings:maps.length,taxMappings:taxMaps.length,...diagnostics,serverTime:new Date().toISOString()});
   } catch(err){ return handleError(res,err); }
 });
 app.post('/api/integrations/soliq-monitor/probe', async (req,res)=>{
@@ -3226,7 +3250,7 @@ app.post('/api/integrations/soliq-monitor/probe', async (req,res)=>{
     ensureDb();
     const diagnostics=await soliqMonitorDiagnostics();
     console.log(`[Soliq Direct Sync] PROBE accepted; direct30d=${diagnostics.directApiCount30d}; last=${diagnostics.lastDirectAt || '-'}`);
-    return res.json({ok:true,stage:'8.4.2-hotfix2',probe:true,...diagnostics,serverTime:new Date().toISOString()});
+    return res.json({ok:true,stage:'8.4.2-hotfix3',probe:true,...diagnostics,serverTime:new Date().toISOString()});
   } catch(err){ return handleError(res,err); }
 });
 app.post('/api/integrations/soliq-monitor/events', async (req,res)=>{
@@ -3272,5 +3296,5 @@ app.delete('/api/soliq-monitor/tax-mappings/:id', async(req,res)=>{
 
 
 app.listen(PORT, () => {
-  console.log(`Ijro nazorati backend Stage 8.4.2 Hotfix 2 running on port ${PORT}`);
+  console.log(`Ijro nazorati backend Stage 8.4.2 Hotfix 3 running on port ${PORT}`);
 });
