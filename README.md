@@ -114,3 +114,11 @@ Direct API asosiy kanal. Telegramni o'chirish shart emas: u rahbar uchun ko'rina
 - Render logida har event uchun `[Soliq Direct Sync] IN` va `OUT` yozuvlari chiqadi.
 - Direct event kelmagan bo‘lsa UI aniq ogohlantiradi.
 - Supabase SQL qayta bajarilishi shart emas.
+
+
+## Stage 8.4.2 Hotfix 2 — execution month + one-time sync
+- Nazorat oyi qattiq biznes qoida bo‘yicha jo‘natilgan/to‘langan sana oyidan olinadi.
+- Hisobot davri alohida tarixiy maydon bo‘lib qoladi.
+- Direct API event_id bo‘yicha idempotent; takror event yangi amal yaratmaydi.
+- Frontend jurnalida Nazorat oyi va Hisobot davri alohida ko‘rsatiladi.
+- Supabase uchun qo‘shimcha migratsiya talab qilinmaydi.

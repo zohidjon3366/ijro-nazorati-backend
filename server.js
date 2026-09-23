@@ -77,7 +77,7 @@ const SOLIQ_MONITOR_NOTIFY_PROBLEMS = envBoolEarly(process.env.SOLIQ_MONITOR_NOT
 const SOLIQ_MONITOR_NOTIFY_CUSTOMER = envBoolEarly(process.env.SOLIQ_MONITOR_NOTIFY_CUSTOMER, false);
 // Hotfix 2: qabul qilingan tashqi hisobot Nazorat jadvalini fakt bo'yicha tasdiqlaydi.
 // sent_month = hisobot qaysi oy uchun ekanidan qat'i nazar, real jo'natilgan oy Nazorat jadvali oyi hisoblanadi.
-const SOLIQ_MONITOR_CONTROL_MONTH_MODE = String(process.env.SOLIQ_MONITOR_CONTROL_MONTH_MODE || 'sent_month').trim().toLowerCase();
+const SOLIQ_MONITOR_CONTROL_MONTH_MODE = 'execution_month'; // fixed business rule: submitted/paid month
 const SOLIQ_MONITOR_CONTROL_TIMEZONE = String(process.env.SOLIQ_MONITOR_CONTROL_TIMEZONE || TELEGRAM_TIMEZONE || 'Asia/Tashkent').trim();
 const SOLIQ_MONITOR_ACCEPTED_SYNC_ANY_ASSIGNEE = envBoolEarly(process.env.SOLIQ_MONITOR_ACCEPTED_SYNC_ANY_ASSIGNEE, true);
 const SOLIQ_MONITOR_IMPORT_SECRET = String(process.env.SOLIQ_MONITOR_IMPORT_SECRET || '').trim();
@@ -2509,8 +2509,10 @@ function monitoringMonthFromIso(value) {
   }
 }
 function monitoringControlMonth(report = {}) {
-  if (SOLIQ_MONITOR_CONTROL_MONTH_MODE === 'report_period') return report.period || monitoringMonthFromIso(report.sentAt) || monitoringMonthFromIso(report.checkedAt);
-  // Default: Nazorat jadvali bajarish/topshirish oyini ko'rsatadi. Masalan Avgust hisoboti 11-sentabrda topshirilsa -> Sentabr jadvali.
+  // Hotfix 2 business rule: Nazorat jadvali HISOBOT DAVRI bo'yicha emas,
+  // amalda topshirilgan/bajarilgan oy bo'yicha yuritiladi.
+  // Masalan: Avgust hisoboti 11-sentabrda topshirildi -> Sentabr nazorat jadvali.
+  // report.period faqat dalil/tarix sifatida saqlanadi va sentAt yo'q bo'lsa fallback bo'ladi.
   return monitoringMonthFromIso(report.sentAt) || monitoringMonthFromIso(report.checkedAt) || report.period || '';
 }
 function monitoringAcceptedGroup(group) {
@@ -3215,7 +3217,7 @@ app.get('/api/integrations/soliq-monitor/health', async (req,res)=>{
     if (!monitorImportSecretAllowed(req)) return res.status(401).json({ok:false,error:'Unauthorized'});
     ensureDb();
     const [maps,taxMaps,diagnostics]=await Promise.all([monitoringMappings().catch(()=>[]),monitoringTaxMappings().catch(()=>[]),soliqMonitorDiagnostics()]);
-    return res.json({ok:true,stage:'8.4.2-hotfix1',integration:'Unified Soliq Integration',directApi:true,reportMappings:maps.length,taxMappings:taxMaps.length,...diagnostics,serverTime:new Date().toISOString()});
+    return res.json({ok:true,stage:'8.4.2-hotfix2',integration:'Unified Soliq Integration',directApi:true,reportMappings:maps.length,taxMappings:taxMaps.length,...diagnostics,serverTime:new Date().toISOString()});
   } catch(err){ return handleError(res,err); }
 });
 app.post('/api/integrations/soliq-monitor/probe', async (req,res)=>{
@@ -3224,7 +3226,7 @@ app.post('/api/integrations/soliq-monitor/probe', async (req,res)=>{
     ensureDb();
     const diagnostics=await soliqMonitorDiagnostics();
     console.log(`[Soliq Direct Sync] PROBE accepted; direct30d=${diagnostics.directApiCount30d}; last=${diagnostics.lastDirectAt || '-'}`);
-    return res.json({ok:true,stage:'8.4.2-hotfix1',probe:true,...diagnostics,serverTime:new Date().toISOString()});
+    return res.json({ok:true,stage:'8.4.2-hotfix2',probe:true,...diagnostics,serverTime:new Date().toISOString()});
   } catch(err){ return handleError(res,err); }
 });
 app.post('/api/integrations/soliq-monitor/events', async (req,res)=>{
@@ -3270,5 +3272,5 @@ app.delete('/api/soliq-monitor/tax-mappings/:id', async(req,res)=>{
 
 
 app.listen(PORT, () => {
-  console.log(`Ijro nazorati backend Stage 8.4.2 Hotfix 1 running on port ${PORT}`);
+  console.log(`Ijro nazorati backend Stage 8.4.2 Hotfix 2 running on port ${PORT}`);
 });
